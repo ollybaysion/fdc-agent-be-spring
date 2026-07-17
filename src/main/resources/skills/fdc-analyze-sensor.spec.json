@@ -1,0 +1,25 @@
+{
+  "name": "fdc-analyze-sensor",
+  "argumentHint": "{equipment} {param_index} {start} {end}",
+  "description": "특정 설비의 센서를 PARAM_INDEX(센서 파라미터 인덱스)로 지정해 주어진 기간 동안 분석한다 — 측정 통계(건수·평균·표준편차·범위)와 이상치를 낸다. 설비명·PARAM_INDEX·기간(시작/끝)이 모두 있어야 호출 가능하다.",
+  "h1Title": "센서 측정 분석 절차",
+  "intro": "입력 `{equipment}` `{param_index}` `{start}` `{end}` 로 해당 구간 측정을 집계해, 통계·이상치를 낸 뒤 이상 여부를 자연어로 해석해 답한다. 센서는 이름이 아니라 PARAM_INDEX 로 식별한다.",
+  "steps": [
+    {
+      "title": "측정 통계",
+      "sql": "SELECT COUNT(*) AS CNT, ROUND(AVG(meas_val), 2) AS MEAN, ROUND(STDDEV(meas_val), 2) AS SD, ROUND(MIN(meas_val), 2) AS MINV, ROUND(MAX(meas_val), 2) AS MAXV, COUNT(CASE WHEN oo_spec_yn = 'Y' THEN 1 END) AS ANOM\n  FROM fdc_sensor_reading\n WHERE eqp_id = :eqp AND param_index = :pidx\n   AND read_time BETWEEN :start AND :end",
+      "notes": "- CNT = 0 이면 해당 기간·PARAM_INDEX 로 측정이 없다고 답하고 끝(지어내지 않는다)."
+    }
+  ],
+  "valueRules": [
+    {
+      "target": "ANOM",
+      "rule": "스펙 이탈(oo_spec_yn='Y') 측정 건수 = 이상치. 0 이면 정상 범위.",
+      "basis": "scaffold(데모)"
+    }
+  ],
+  "output": {
+    "lead": "한 문단으로, 수치를 근거로 이상 여부·특이점을 해석:",
+    "template": "설비 {equipment} 의 PARAM_INDEX {param_index} 센서, {start}~{end} 기간 분석 — 측정 {CNT}건, 평균 {MEAN}, 표준편차 {SD}, 범위 {MINV}~{MAXV}, 이상치 {ANOM}건. {이상치가 0이면: 정상 범위로 안정적이다.} {이상치가 있으면: 스펙 이탈 {ANOM}건으로 점검이 필요하다.}"
+  }
+}

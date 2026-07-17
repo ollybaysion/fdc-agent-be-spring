@@ -1,0 +1,32 @@
+# 환경 변수 이름은 Node 판(fdc-agent-be)의 .env 계약을 그대로 유지한다 —
+# 같은 .env 로 두 서버를 나란히 띄워 패리티 비교/스왑이 가능하도록.
+server:
+  port: ${PORT:8080}
+  address: ${HOST:0.0.0.0}
+
+spring:
+  application:
+    name: fdc-agent-be
+  threads:
+    virtual:
+      enabled: true # SSE 문자 스트리밍·에이전트 루프의 blocking 을 가상 스레드로.
+
+logging:
+  level:
+    root: ${LOG_LEVEL:info}
+
+fdc:
+  # development | production | test (NODE_ENV 계약 유지)
+  env: ${NODE_ENV:development}
+  # fixture(Phase 0) | oracle(Phase 1)
+  data-source: ${DATA_SOURCE:fixture}
+  oracle:
+    user: ${ORACLE_USER:}
+    password: ${ORACLE_PASSWORD:}
+    connect-string: ${ORACLE_CONNECT_STRING:}
+    pool-min: ${ORACLE_POOL_MIN:2}
+    pool-max: ${ORACLE_POOL_MAX:10}
+  llm:
+    base-url: ${LLM_BASE_URL:}
+    api-key: ${LLM_API_KEY:}
+    model: ${LLM_MODEL:}

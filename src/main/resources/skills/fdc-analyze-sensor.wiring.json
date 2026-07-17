@@ -1,0 +1,16 @@
+{
+  "args": [
+    { "name": "equipment", "description": "설비명 (예: ETCH-01)" },
+    { "name": "param_index", "description": "센서 파라미터 인덱스 (예: 5)" },
+    { "name": "start", "description": "분석 시작 (예: 2026-05-01)" },
+    { "name": "end", "description": "분석 끝 (예: 2026-05-07)" }
+  ],
+  "binds": {
+    "0": {
+      "eqp": { "from": "arg", "arg": "equipment" },
+      "pidx": { "from": "arg", "arg": "param_index" },
+      "start": { "from": "arg", "arg": "start" },
+      "end": { "from": "arg", "arg": "end" }
+    }
+  }
+}
