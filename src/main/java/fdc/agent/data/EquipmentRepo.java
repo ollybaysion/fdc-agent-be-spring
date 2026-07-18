@@ -1,6 +1,5 @@
 package fdc.agent.data;
 
-import fdc.agent.contract.Compare;
 import fdc.agent.contract.EquipmentDetail;
 import fdc.agent.contract.SetupEvent;
 import java.util.List;
@@ -18,6 +17,4 @@ public interface EquipmentRepo {
     List<EquipmentDetail> getPeers(String id);
 
     List<SetupEvent> getSetupEvents(String id);
-
-    Compare.CompareResponse getCompare(String id, String peerId, String recipe, int windowDays);
 }

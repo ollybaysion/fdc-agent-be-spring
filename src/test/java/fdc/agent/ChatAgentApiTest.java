@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -15,13 +16,19 @@ import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
 
-/** Node 판 test/chat.agent.test.ts 포팅 — 에이전트(mock LLM) SSE 계약. */
+/**
+ * Node 판 test/chat.agent.test.ts 포팅 — 에이전트(mock LLM) SSE 계약.
+ * SSE 스트림/검증 기본 계약 테스트는 구 EquipmentApiTest 에서 이동
+ * (정형 GET 제거, 2026-07-19).
+ */
 @SpringBootTest
 @AutoConfigureMockMvc
 class ChatAgentApiTest {
 
     @Autowired
     private MockMvc mvc;
+
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     private MockHttpServletResponse chat(String userContent) throws Exception {
         return mvc.perform(post("/api/fdc/v1/chat")
@@ -70,6 +77,28 @@ class ChatAgentApiTest {
         peers.path("rows").forEach(r -> ids.add(r.path("ID").asText()));
         assertThat(ids).contains("ETCH-02");
         assertThat(ids).doesNotContain("ETCH-01");
+    }
+
+    @Test
+    void chat은_SSE로_token_done_을_스트리밍하고_요청_헤더를_단다() throws Exception {
+        MockHttpServletResponse res = chat("안녕");
+        assertThat(res.getStatus()).isEqualTo(200);
+        assertThat(res.getHeader("Content-Type")).contains("text/event-stream");
+        assertThat(res.getHeader("x-request-id")).isNotBlank();
+        String body = res.getContentAsString(StandardCharsets.UTF_8);
+        assertThat(body).contains("event: token");
+        assertThat(body).contains("event: done");
+    }
+
+    @Test
+    void messages_누락은_400_messages_required() throws Exception {
+        MockHttpServletResponse res = mvc.perform(post("/api/fdc/v1/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andReturn().getResponse();
+        assertThat(res.getStatus()).isEqualTo(400);
+        JsonNode parsed = JSON.readTree(res.getContentAsString(StandardCharsets.UTF_8));
+        assertThat(parsed.path("error").asText()).isEqualTo("messages_required");
     }
 
     @Test

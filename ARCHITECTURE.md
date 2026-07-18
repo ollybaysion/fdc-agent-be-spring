@@ -24,13 +24,13 @@
 | 런타임 | **Java 21 LTS** (Temurin/Corretto) | 가상 스레드로 blocking SSE·에이전트 루프 단순화. Oracle JDK 회피(NFTC 무료 2026-09 종료 — 라이선스 리스크 0인 OpenJDK 빌드) |
 | 프레임워크 | **Spring Boot 3.5 · Web MVC** | 사내 표준 친화. chat 도 에이전트 실행 완료 후 스트리밍이라 WebFlux 불필요 — MVC+가상 스레드로 충분 |
 | 빌드 | **Gradle 8** (wrapper) | wrapper 는 Gradle 버전만 고정 — **JDK 21 은 별도 설치 + `JAVA_HOME` 지정 필요**(toolchain 자동 다운로드 미구성) |
-| 계약(DTO) | **Java record + Jackson** | zod 계약과 1:1 — 선언 순서=JSON 키 순서, `@JsonInclude(NON_NULL)`=optional, `ALWAYS`=nullable(matchedRun). 숫자는 `Number`로 JS 표기 유지 |
+| 계약(DTO) | **Java record + Jackson** | zod 계약과 1:1 — 선언 순서=JSON 키 순서, `@JsonInclude(NON_NULL)`=optional, `ALWAYS`=nullable. 숫자는 `Number`로 JS 표기 유지 |
 | Oracle 접근 | **ojdbc11(thin) + HikariCP + `JdbcClient`** | thin = Instant Client 불필요·19c 호환. 네임드 바인드(`:id`)가 스킬 spec SQL과 1:1. read-only 정형 SQL이라 JPA 불채용 |
 | LLM 클라이언트 | **`java.net.http` 직구현** (OpenAiLlm) | OpenAI 호환 온프렘 GW 대응. 툴 루프(MAX_STEPS=4)가 작고 명시적이라 프레임워크(Spring AI) 없이 동작 보존 우선. mock ↔ openai seam 유지 |
 | 검증·에러 | 컨트롤러 명시 검증 + `@RestControllerAdvice` | 입력 캡(100/10k) 재적용, API.md 에러코드 미러링, prod 5xx 상세 마스킹 |
 | 로깅 | **SLF4J/Logback + MDC** | `X-Request-Id` 전파. 요청 헤더는 애초에 로깅 안 함 — 로깅 확장 시 민감 헤더 마스킹 필수 |
-| 테스트 | **JUnit 5 + Spring Boot Test/MockMvc** | vitest 스위트 1:1 포팅(31 테스트). MockMvc = Fastify `.inject()` 대응 |
-| 회귀 판정 | **패리티 하네스** = `scripts/parity.sh` (Node 판 병행 기동 + 24케이스 diff) | deprecated Node 판의 마지막 역할 — byte-identical 기준선(2026-07-17) |
+| 테스트 | **JUnit 5 + Spring Boot Test/MockMvc** | vitest 스위트 1:1 포팅 후 정형 GET 분 제거(23 테스트). MockMvc = Fastify `.inject()` 대응 |
+| 회귀 판정 | **패리티 하네스** = `scripts/parity.sh` (Node 판 병행 기동 + diff, 현행 9케이스) | 포팅 합격 기준선 = 24케이스 byte-identical(2026-07-17, 정형 GET 제거 전) |
 
 **참고 — v1(Node/TS) 스택**: Node 22·TS 5·pnpm·Fastify·node-oracledb·zod·pino·vitest.
 이 스택으로 Phase 0~2를 구축·검증한 뒤 2026-07-17 Spring 으로 전체 포팅 — 선정 근거는
@@ -52,8 +52,8 @@ fdc-agent-be-spring/
     │   ├── FdcAgentBeApplication.java  # 진입점 (DataSource 자동설정 제외)
     │   ├── config/    # AppProps(env 계약) · DataConfig(seam 배선) · OracleConfig(조건부 풀)
     │   │              # RequestIdFilter · ApiException(Handler)
-    │   ├── web/       # EquipmentController(정형 4 GET) · ChatController(SSE) · Health
-    │   ├── contract/  # 계약 record — EquipmentDetail·Compare·ChatTable·DonePayload…
+    │   ├── web/       # ChatController(SSE) · HealthController
+    │   ├── contract/  # 계약 record — EquipmentDetail·SetupEvent·ChatTable·DonePayload…
     │   ├── chat/      # ChatAgent(툴 루프) · EquipmentTools(손툴) · AgentTool
     │   ├── llm/       # LlmClient seam(LlmTypes 내 인터페이스): MockLlm ↔ OpenAiLlm
     │   ├── skills/    # SkillLoader·SkillRegistry — spec.json → 에이전트 툴 컴파일
@@ -62,8 +62,8 @@ fdc-agent-be-spring/
     ├── main/resources/
     │   ├── application.yml            # env 이름 계약 유지 (DATA_SOURCE/ORACLE_*/LLM_*)
     │   └── skills/*.spec.json + *.wiring.json   # ★ 언어 중립 — Node 판과 동일 파일
-    ├── test/java/fdc/agent/           # JUnit 31 (vitest 1:1 포팅)
-    ├── scripts/parity.sh              # 패리티 하네스 (24케이스 diff)
+    ├── test/java/fdc/agent/           # JUnit 23 (vitest 1:1 포팅 + 정형 GET 분 제거)
+    ├── scripts/parity.sh              # 패리티 하네스 (chat+health 9케이스 diff)
     └── docs/phase1-사내-runbook.md    # Oracle 연결 절차 (사내 단계)
 ```
 
@@ -84,9 +84,12 @@ zod 스키마는 deprecated Node 판에 남아 3번의 대조군으로만 쓰인
 
 ### HTTP 표면 · 문서 포인터
 
-- `GET /health` · 정형 4 GET `/api/fdc/v1/equipment/{id}[ /peers | /setup-events | /compare ]`
-- `POST /api/fdc/v1/chat` — SSE `token* → done | error`. 에이전트 실행은
-  스트리밍 전 완료(실패는 정상 HTTP 에러로).
+- `GET /health` · `POST /api/fdc/v1/chat` — SSE `token* → done | error`.
+  에이전트 실행은 스트리밍 전 완료(실패는 정상 HTTP 에러로).
+- **정형 조회 4 GET(`/equipment/{id}`·`/peers`·`/setup-events`·`/compare`)은
+  2026-07-19 제거** — 설비 상세·비교는 챗 에이전트로 일원화(FE 패널도 동시
+  제거). 데이터 접근(`EquipmentRepo` detail/peers/setup-events)은 에이전트
+  손툴이 계속 사용하므로 남는다. 부활 시 git 이력·Node 판 참조.
 - 빌드·기동·패리티 재검증 절차 = `README.md`, 계약 프로즈 원본 = demo-fe
   `API.md`+`types.ts`, Oracle 연결 절차 = `docs/phase1-사내-runbook.md`.
 
@@ -145,10 +148,11 @@ BACKEND_URL=http://fdc-agent-be:8080     # ★ origin만! /api/fdc/v1 붙이지 
 2. ~~온프렘 모델 tool calling 지원 여부~~ — **해소** (Node·Spring 양판 모두
    실 Claude 로 툴 루프 end-to-end 실증 — Spring 판은 FE 연동 라이브 데모
    2026-07-17. 사내 GW 는 env 3개만 교체).
-3. **Oracle 연결 = 사내 남음, 작업은 두 곳** — ① `SchemaMap.java` `TODO_`
-   치환(정형 3 GET 은 이것만으로 완성), ② compare 분석 SQL 실구현
-   (`OracleEquipmentRepo.getCompare`, 현재 501). 절차 = 이 레포
-   `docs/phase1-사내-runbook.md`(Node 판 runbook 의 Java 각색 사본).
+3. **Oracle 연결 = 사내 남음, 작업은 한 곳** — `SchemaMap.java` `TODO_`
+   치환뿐(에이전트 손툴의 detail/peers/setup-events 조회가 이것만으로 완성).
+   compare 분석 SQL 은 정형 GET 제거(2026-07-19)와 함께 **작업 자체가 소멸**.
+   절차 = 이 레포 `docs/phase1-사내-runbook.md`(Node 판 runbook 의 Java 각색 사본
+   — §5 compare 절은 이제 해당 없음).
 
 ---
 
@@ -157,9 +161,10 @@ BACKEND_URL=http://fdc-agent-be:8080     # ★ origin만! /api/fdc/v1 붙이지 
 | Phase | 내용 | Oracle | LLM | 상태 |
 | --- | --- | --- | --- | --- |
 | 0 | contract + 스켈레톤 + fixtures + FE 배선 + chat forward | ✗(fixture) | ✗ | **완료** |
-| 1 | 정형 4 GET Oracle DAO | ✓ | ✗ | **골격 완료** (compare SQL·SchemaMap = 사내) |
+| 1 | 정형 4 GET Oracle DAO | ✓ | ✗ | 골격 완료 후 **HTTP 표면 제거**(2026-07-19, 아래 행) |
 | 2 | chat 에이전트 + skill-loader + 폼 분석 + 후속질문 | ✓ | ✓ | **완료** (실 Claude 입증) |
 | — | **Spring 전체 포팅** (패리티 24 byte-identical + JUnit 31) | ✓ | ✓ | **완료** — 이후 기준 구현 |
+| — | **정형 4 GET 제거** — 챗 일원화(FE 패널 동시 제거), compare SQL 사내 작업 소멸 | — | — | **완료** (2026-07-19) |
 | 3 | summary(LLM 요약) + upload(이미지, magic-byte 검증) | ✓ | ✓ | 미착수 — **이 레포에서 진행** |
 
 Phase 0~2는 Node 판으로 구축·검증한 역사이고 산출물은 포팅으로 승계됐다.

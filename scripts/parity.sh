@@ -1,11 +1,13 @@
 #!/bin/bash
-# fdc-agent-be(Node, :8081) vs fdc-agent-be-spring(:8080) 응답 패리티 diff — 24케이스.
+# fdc-agent-be(Node, :8081) vs fdc-agent-be-spring(:8080) 응답 패리티 diff — 9케이스.
 #
 # 사전 조건: 두 서버가 같은 설정(fixture + mock LLM)으로 떠 있어야 한다.
 #   터미널 1: (cd ../fdc-agent-be && PORT=8081 pnpm dev)
 #   터미널 2: ./gradlew bootRun
 # 실행: ./scripts/parity.sh   (jq 필요)
 # 기준선: 2026-07-17 — 24케이스 전부 byte-identical (SSE 는 messageId 만 정규화).
+# 2026-07-19 정형 조회 4종(equipment) 제거로 GET 15케이스 삭제 — Node 판(대조군)
+# 은 여전히 그 경로를 서빙하지만 Spring(기준 구현) 표면에서 빠졌으므로 비교 대상 아님.
 NODE=http://localhost:8081
 SPRING=http://localhost:8080
 PASS=0
@@ -58,21 +60,6 @@ check_chat() {
 }
 
 check_get "/health"
-check_get "/api/fdc/v1/equipment/ETCH-01"
-check_get "/api/fdc/v1/equipment/CVD-03"
-check_get "/api/fdc/v1/equipment/NOPE"
-check_get "/api/fdc/v1/equipment/ETCH-01/peers"
-check_get "/api/fdc/v1/equipment/CVD-01/peers"
-check_get "/api/fdc/v1/equipment/ETCH-01/setup-events"
-check_get "/api/fdc/v1/equipment/CVD-02/setup-events"
-check_get "/api/fdc/v1/equipment/ETCH-01/compare?peerId=ETCH-02&recipe=RECIPE_X&window=7"
-check_get "/api/fdc/v1/equipment/ETCH-01/compare?peerId=ETCH-03&recipe=RECIPE_Y&window=1"
-check_get "/api/fdc/v1/equipment/CVD-01/compare?peerId=CVD-02&recipe=RECIPE_Z&window=30"
-check_get "/api/fdc/v1/equipment/ETCH-02/compare?peerId=ETCH-01&recipe=RECIPE_X&window=1"
-check_get "/api/fdc/v1/equipment/ETCH-01/compare?recipe=RECIPE_X"
-check_get "/api/fdc/v1/equipment/ETCH-01/compare?peerId=ETCH-02&recipe=BAD"
-check_get "/api/fdc/v1/equipment/ETCH-01/compare?peerId=ETCH-02&recipe=RECIPE_X&window=3"
-check_get "/api/fdc/v1/equipment/ETCH-01/compare?peerId=ETCH-02&recipe=RECIPE_X&window=abc"
 check_get "/api/fdc/v1/nope"
 
 check_chat '{"messages":[{"role":"user","content":"ETCH-01 설비 정보 보여줘"}]}' "detail"

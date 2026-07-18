@@ -1,6 +1,5 @@
 package fdc.agent.data.fixtures;
 
-import fdc.agent.contract.Compare;
 import fdc.agent.contract.EquipmentDetail;
 import fdc.agent.contract.EquipmentDetail.EquipmentSection;
 import fdc.agent.contract.EquipmentDetail.SectionRow;
@@ -39,10 +38,5 @@ public class FixtureRepo implements EquipmentRepo {
     @Override
     public List<SetupEvent> getSetupEvents(String id) {
         return MockData.getSetupEvents(id);
-    }
-
-    @Override
-    public Compare.CompareResponse getCompare(String id, String peerId, String recipe, int windowDays) {
-        return MockData.getCompareData(id, peerId, recipe, windowDays);
     }
 }

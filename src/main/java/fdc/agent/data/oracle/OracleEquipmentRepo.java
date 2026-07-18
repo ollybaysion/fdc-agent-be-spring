@@ -3,8 +3,6 @@ package fdc.agent.data.oracle;
 import static fdc.agent.data.oracle.SchemaMap.assertIdent;
 import static fdc.agent.data.oracle.SchemaMap.labelsFor;
 
-import fdc.agent.config.ApiException;
-import fdc.agent.contract.Compare;
 import fdc.agent.contract.EquipmentDetail;
 import fdc.agent.contract.EquipmentDetail.EquipmentSection;
 import fdc.agent.contract.EquipmentDetail.SectionRow;
@@ -21,7 +19,6 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * SchemaMap 의 식별자로 조립하고, 값은 항상 bind 변수(:id 등)로 넘긴다.
  *
  * detail / peers / setup-events 는 완성형(사내엔 SchemaMap 이름만 채우면 됨).
- * compare 는 분석 쿼리라 사내에서 SQL 작성 필요 — 원본 runbook §5 참고.
  */
 public class OracleEquipmentRepo implements EquipmentRepo {
 
@@ -160,13 +157,5 @@ public class OracleEquipmentRepo implements EquipmentRepo {
                     type,
                     label == null || String.valueOf(label).isEmpty() ? null : String.valueOf(label));
         }).toList();
-    }
-
-    @Override
-    public Compare.CompareResponse getCompare(String id, String peerId, String recipe, int windowDays) {
-        // compare 는 통계·시계열·챔버이벤트·알람을 조합하는 분석 쿼리라 사내에서
-        // 실 센서/알람 테이블 기준으로 작성해야 한다(원본 runbook §5).
-        throw new ApiException(501, "error",
-                "compare Oracle SQL 미구현 — docs/phase1-사내-runbook.md §5 에서 작성 필요");
     }
 }

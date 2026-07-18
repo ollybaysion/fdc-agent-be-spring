@@ -7,7 +7,7 @@
 외부에서 이미 끝났고, 사내에선 아래를 **순서대로 복붙 실행**하면 된다.
 
 핵심 원칙: 실 스키마는 `src/main/java/fdc/agent/data/oracle/SchemaMap.java`
-**한 파일**에만 채운다. SQL 로직은 손대지 않는다(compare 제외 §5).
+**한 파일**에만 채운다. SQL 로직은 손대지 않는다.
 
 ## 0. 사전 준비
 
@@ -69,32 +69,31 @@ static final SetupEventMap SETUP_EVENT = new SetupEventMap(
 `SchemaMapTest`/`assertIdent` 가 SchemaMap 의 모든 식별자를 화이트리스트
 검증한다. 실명에 공백·특수문자가 있으면 여기서 걸린다(그런 컬럼명은 없어야 정상).
 
-## 4. 실 DB 스모크 (detail / peers / setup-events)
+## 4. 실 DB 스모크 (detail / peers / setup-events — 챗 경유)
+
+정형 GET 은 제거됐으므로(2026-07-19) 스모크는 chat 엔드포인트로 — 에이전트
+손툴이 같은 `EquipmentRepo` 조회를 태운다:
 
 ```sh
 DATA_SOURCE=oracle ./gradlew bootRun
-# 다른 셸에서 — 실제 설비 ID 로:
-curl -s localhost:8080/api/fdc/v1/equipment/<실설비ID> | head
-curl -s localhost:8080/api/fdc/v1/equipment/<실설비ID>/peers | head
-curl -s localhost:8080/api/fdc/v1/equipment/<실설비ID>/setup-events
+# 다른 셸에서 — 실제 설비 ID 로 (mock LLM 은 설비 ID 패턴을 감지해 툴 호출):
+curl -sN -X POST -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"<실설비ID> 설비 정보 보여줘"}]}' \
+  localhost:8080/api/fdc/v1/chat | head -40
 ```
 
-Spring 판은 zod 런타임 parse 가 없다 — 형태는 contract record 가 컴파일 타임에
-강제하고, 매핑 오류(컬럼 오타·타입 불일치)는 SQL 예외나 null 값으로 드러난다.
-스모크에서 응답 JSON 을 fixture 모드 응답과 눈으로 대조할 것.
+`event: done` 페이로드의 tables 에 실 컬럼 라벨(`valueLabels`)과 실데이터
+행이 실렸는지 확인. 주의: mock LLM 의 설비 ID 감지 패턴은
+`[A-Z]{2,4}-\d{2,}` — 실 ID 형식이 다르면 `LLM_BASE_URL`(실 LLM)을 설정하고
+스모크한다. Spring 판은 zod 런타임 parse 가 없다 — 형태는 contract
+record 가 컴파일 타임에 강제하고, 매핑 오류(컬럼 오타·타입 불일치)는 SQL
+예외나 null 값으로 드러난다. fixture 모드 응답과 눈으로 대조할 것.
 
-## 5. compare SQL 작성 (분석 쿼리 — 유일한 실코딩)
+## 5. ~~compare SQL 작성~~ — 해당 없음 (2026-07-19 제거)
 
-`OracleEquipmentRepo.getCompare` 는 현재 501 stub. 실 센서/알람 테이블
-기준으로 아래 조각을 작성해 `Compare.CompareResponse` 형태로 조립한다:
-
-- **matchedRun** — post-setup 윈도우(window 일) 안에서 recipe 매칭된 run
-- **sensorStats** — 센서별 mean/stddev/max/min/anomalies (양쪽 설비)
-- **series** — 매칭 run 양쪽에 있을 때만, 경과분(t) 기준 센서 시계열
-- **chamberEvents** / **alarms** — 챔버 이벤트·알람 lane
-
-각 조각은 `JdbcClient` 네임드 바인드로 실행하고, contract record 로 조립해
-반환. (형태는 `fixtures/MockData.getCompareData` 반환 구조가 그대로 레퍼런스.)
+정형 조회 4 GET(compare 포함)이 HTTP 표면에서 제거되어 **compare 분석 SQL
+작업은 소멸**했다. 사내 실코딩 항목 없음 — §2 의 SchemaMap 치환이 전부다.
+(부활 시 Node 판 runbook §5 + `fdc-agent-be` 구현 이력 참조.)
 
 ## 6. 전환 + FE 검증
 
@@ -105,7 +104,7 @@ DATA_SOURCE=oracle
 
 프론트(demo-fe)를 `BACKEND_URL` 로 이 서버에 붙인 뒤:
 
-- 설비 상세 / 동종설비 비교가 **실데이터**로 뜨는지
+- 챗으로 설비 상세·동종설비·셋업 이력을 물었을 때 **실데이터** 표가 뜨는지
 - 응답 헤더 `x-fdc-data-source: oracle` 확인 (fixture → oracle 로 바뀜)
 - (demo-fe 배지 PR 이 머지됐다면) 화면 배지가 `oracle` 로 표시
 
