@@ -20,7 +20,7 @@
       "title": "3단계 — 설비 최근 이벤트 (정비 맥락)",
       "lead": "1단계의 EQP_ID로:",
       "sql": "SELECT TO_CHAR(evt_time, 'YYYY-MM-DD') AS d, evt_type_cd, evt_label\n  FROM fdc_setup_event WHERE eqp_id = :eqp\n ORDER BY evt_time DESC FETCH FIRST 3 ROWS ONLY",
-      "notes": "- EVT_TYPE_CD는 아래 코드표로 해석. 코드표에 없는 값은 \"기타(원시값)\"로 표기 — 지어내지 않는다."
+      "notes": "- EVT_TYPE_CD는 아래 코드표로 해석. 코드표에 없는 값은 \"기타(센서값)\"로 표기 — 지어내지 않는다."
     }
   ],
   "valueRules": [
@@ -36,14 +36,14 @@
     },
     {
       "target": "SNSR_TYPE_CD / UNIT_CD",
-      "rule": "원시값 그대로 표기 (의미 매핑 미확인)",
+      "rule": "센서값 그대로 표기 (의미 매핑 미확인)",
       "basis": "scaffold(데모)"
     }
   ],
   "output": {
     "lead": "한 문단, 다음 순서로 (없는 정보는 문장째 생략):",
-    "template": "센서 {SNSR_ID}는 {EQP_NAME}({EQP_ID}, {VENDOR} {MODEL_CD})의 {SNSR_TYPE_CD} 센서(단위 {UNIT_CD})로, 현재 {사용 중|비활성}이다. {설비가 미사용이면: 소속 설비 자체가 미사용 상태다.} 최근 설비 이벤트: {날짜} {해석된 유형}({라벨}), … . {코드표 밖 값·미확인 의미가 있으면: ⚠ {원시값}은 의미 미확인.}",
+    "template": "센서 {SNSR_ID}는 {EQP_NAME}({EQP_ID}, {VENDOR} {MODEL_CD})의 {SNSR_TYPE_CD} 센서(단위 {UNIT_CD})로, 현재 {사용 중|비활성}이다. {설비가 미사용이면: 소속 설비 자체가 미사용 상태다.} 최근 설비 이벤트: {날짜} {해석된 유형}({라벨}), … . {코드표 밖 값·미확인 의미가 있으면: ⚠ {센서값}은 의미 미확인.}",
     "exampleLabel": "예시 (시드 데이터 기준):",
-    "example": "센서 S-0004는 증착기 1호(CVD-01, AMAT CV-800)의 FLOW 센서(단위 SCCM)로, 현재 비활성이다. 소속 설비 자체가 미사용 상태다. 최근 설비 이벤트: 2026-05-11 기타(원시값 O). ⚠ SNSR_TYPE_CD=FLOW, UNIT_CD=SCCM은 의미 미확인(원시값 표기)."
+    "example": "센서 S-0004는 증착기 1호(CVD-01, AMAT CV-800)의 FLOW 센서(단위 SCCM)로, 현재 비활성이다. 소속 설비 자체가 미사용 상태다. 최근 설비 이벤트: 2026-05-11 기타(센서값 O). ⚠ SNSR_TYPE_CD=FLOW, UNIT_CD=SCCM은 의미 미확인(센서값 표기)."
   }
 }
