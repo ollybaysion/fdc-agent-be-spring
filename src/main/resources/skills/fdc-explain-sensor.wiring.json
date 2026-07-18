@@ -1,0 +1,8 @@
+{
+  "args": [{ "name": "snsr_id", "description": "센서 ID (예: S-0001)" }],
+  "binds": {
+    "0": { "id": { "from": "arg", "arg": "snsr_id" } },
+    "1": { "eqp": { "from": "step", "step": 0, "column": "EQP_ID" } },
+    "2": { "eqp": { "from": "step", "step": 0, "column": "EQP_ID" } }
+  }
+}
