@@ -31,7 +31,7 @@
 | node-oracledb pool | HikariCP + `JdbcClient` (oracle 모드에서만 활성) |
 | openai SDK → 온프렘 GW | `java.net.http.HttpClient` 직구현 (`llm/OpenAiLlm`) |
 | env.ts fail-fast | `@ConfigurationProperties` (`config/AppProps`) |
-| vitest `.inject()` | JUnit 5 + MockMvc (원본 테스트 1:1 포팅, 25 테스트) |
+| vitest `.inject()` | JUnit 5 + MockMvc (원본 테스트 1:1 포팅, 31 테스트) |
 
 시임(seam)은 원본과 동일: `DATA_SOURCE`(fixture↔oracle), `LLM_BASE_URL`
 (mock↔openai), 스킬 spec.json 은 **언어 중립 진실원**으로 그대로 복사해
@@ -40,9 +40,11 @@
 ## 실행
 
 ```bash
-# JDK 21 필요 (Temurin/Corretto 권장 — Oracle JDK 는 라이선스 주의)
+# JDK 21 필요 (Temurin/Corretto 권장 — Oracle JDK 는 라이선스 주의).
+# toolchain 자동 다운로드는 미구성 — 시스템 java 가 21 이 아니면 JAVA_HOME 지정:
+export JAVA_HOME=/path/to/jdk-21
 ./gradlew bootRun          # fixture + mock LLM, :8080
-./gradlew test             # 테스트 25개
+./gradlew test             # 테스트 31개
 ```
 
 환경 변수(이름은 Node 판 `.env` 계약 그대로):
@@ -66,7 +68,8 @@ demo-fe 쪽은 `BACKEND_URL=http://<host>:8080` — **오리진만**, `/api/fdc/
 cd ../fdc-agent-be && PORT=8081 pnpm dev
 # 터미널 2: Spring 판
 ./gradlew bootRun
-# 같은 요청을 양쪽에 보내 diff (SSE 는 messageId 만 정규화)
+# 터미널 3: 24케이스 하네스 (SSE 는 messageId 만 정규화, jq 필요)
+./scripts/parity.sh
 ```
 
 ## 사내 이관 포인트 (원본과 동일)
