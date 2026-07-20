@@ -1,0 +1,12 @@
+{
+  "binds": {
+    "0": {
+      "eqp": { "from": "arg", "arg": "equipment" },
+      "pidx": { "from": "arg", "arg": "param_index" },
+      "start": { "from": "arg", "arg": "start" },
+      "end": { "from": "arg", "arg": "end" }
+    },
+    "1": { "eqp": { "from": "arg", "arg": "equipment" } },
+    "2": { "eqp": { "from": "arg", "arg": "equipment" } }
+  }
+}

@@ -50,13 +50,30 @@ class SkillLoaderTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void 다중_인자_스킬은_parameters에_여러_프로퍼티_각_인자를_bind로() {
+    void 다중_인자_스킬의_parameters는_spec_inputs가_소유한다() {
         SkillSpec spec = new SkillSpec(
-                "x-multi", "{a} {b}", "설명", null, null,
-                List.of(new SkillSpec.SkillStep("s", null, "SELECT 1 FROM t WHERE x = :x AND y = :y", null)),
-                null, null, null);
+                "x-multi",
+                "{a} {b}",
+                new SkillSpec.SkillScope("센서", "단일", "상태"),
+                "현재 상태",
+                null,
+                "도메인 주의사항.",
+                List.of(
+                        new SkillSpec.SkillInput("a", true, "첫 인자"),
+                        new SkillSpec.SkillInput("b", true, "둘째 인자")),
+                List.of(new SkillSpec.SkillDependency("agent-db-plugin", null, null)),
+                List.of(new SkillSpec.SkillStep(
+                        "s", "현재 상태", null, "SELECT 1 FROM t WHERE x = :x AND y = :y", null, null)),
+                new SkillSpec.SkillOutput(
+                        List.of(
+                                "없는 사유를 추측한다 — 사유 컬럼은 데이터에 없다",
+                                "측정값을 지어낸다 — 이 스킬 범위 밖이다",
+                                "코드를 구체화한다 — 라벨 이상은 모른다"),
+                        List.of(
+                                new SkillSpec.SkillExample("전체 설명", "넓은 답이다."),
+                                new SkillSpec.SkillExample("좁은 질문", "좁은 답이다."))),
+                null);
         SkillWiring wiring = new SkillWiring(
-                List.of(new SkillWiring.SkillArg("a", null), new SkillWiring.SkillArg("b", null)),
                 Map.of(0, Map.of(
                         "x", new SkillWiring.BindSource("arg", "a", null, null),
                         "y", new SkillWiring.BindSource("arg", "b", null, null))));
@@ -117,10 +134,29 @@ class SkillLoaderTest {
         assertThat(calls.get(1).binds()).isEqualTo(Map.of("eqp", "CVD-01")); // step0.EQP_ID → step1 :eqp
         assertThat(calls.get(2).binds()).isEqualTo(Map.of("eqp", "CVD-01"));
 
-        // 조회 사실 + 출력 형식 프로즈가 LLM 서술용으로 실림.
+        // 조회 사실 + 출력 지침(v2)이 LLM 서술용으로 실림.
         assertThat(res.summary()).contains("S-0004");
-        assertThat(res.summary()).contains("출력 형식");
+        assertThat(res.summary()).contains("[출력 지침]");
+        // 완결성 바닥은 steps[].produces 에서 합성 — 조회한 차원이 빠지지 않게.
+        assertThat(res.summary())
+                .contains("반드시 포함 (질문이 특정 항목만 묻는 게 아니면): 센서 정체·상태 · 소속 설비 · 최근 설비 이벤트");
+        assertThat(res.summary()).contains("[하지 말 것]");
+        assertThat(res.summary()).contains("사유 컬럼은 데이터에 없다");
         assertThat(res.tables()).hasSize(3);
+    }
+
+    @Test
+    void description은_spec_필드가_아니라_scope_focus_inputs에서_합성된다() {
+        SkillQuery query = (sql, binds) -> List.of();
+        AgentTool tool = SkillLoader.loadSkill(SPEC, query, WIRING);
+        assertThat(tool.description())
+                .isEqualTo("특정 센서의 정체·소속 설비·현재 상태를 묻는 상황에서 호출한다 (snsr_id 필요).");
+
+        // 생성 이력은 다른 골격 + 다른 조사.
+        SkillSpec trace = readJson("fdc-trace-reading.spec.json", SkillSpec.class);
+        assertThat(SkillLoader.synthesizeDescription(trace))
+                .isEqualTo("특정 센서 측정값이 어떻게 만들어졌는지 묻는 상황에서 호출한다 "
+                        + "(equipment·param_index·start·end 필요).");
     }
 
     @Test

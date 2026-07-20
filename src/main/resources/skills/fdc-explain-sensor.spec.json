@@ -1,49 +1,64 @@
 {
   "name": "fdc-explain-sensor",
   "argumentHint": "{snsr_id}",
-  "description": "센서 하나를 자연어로 설명한다 — FDC_SENSOR에서 시작해 정의된 순서·분기대로\n소속 설비(FDC_EQUIPMENT)·최근 이벤트(FDC_SETUP_EVENT)를 조회하고, 값 코드를\n해석해 명시된 출력 형식으로 요약한다.",
-  "h1Title": "센서 설명 절차",
-  "intro": "입력 `{snsr_id}`(예: `S-0001`) 하나를 받아, 아래 조회 절차를 순서대로 실행하고\n얻은 값들을 출력 형식대로 자연어로 바꿔 답한다. 모든 조회는 read-only, 값은\n바인드로 넘긴다.",
+  "scope": { "단위": "센서", "카디널리티": "단일", "의도": "상태" },
+  "focus": "정체·소속 설비·현재 상태",
+  "anchorTable": "FDC_SENSOR",
+  "intro": "센서 하나의 기준 정보를 조회해 설명한다 — 종류·단위, 소속 설비, 활성/비활성 상태, 최근 설비 이벤트 맥락. 센서가 비활성이면 소속 설비의 미사용 여부까지 짚어 원인 단서를 준다.",
+  "inputs": [
+    {
+      "name": "snsr_id",
+      "required": true,
+      "description": "설명할 센서를 특정하는 조회 키 (예: S-0004)"
+    }
+  ],
+  "dependencies": [
+    {
+      "mcp": "agent-db-plugin",
+      "tools": ["run_query"],
+      "why": "센서·설비·이벤트 조회"
+    }
+  ],
   "steps": [
     {
       "title": "1단계 — 센서 기본 정보",
+      "produces": "센서 정체·상태",
       "sql": "SELECT snsr_id, eqp_id, snsr_type_cd, unit_cd, use_yn\n  FROM fdc_sensor WHERE snsr_id = :id",
-      "notes": "- 0행이면 종료: \"센서 {id}는 등록되어 있지 않다\"고 답하고 끝.\n- USE_YN = 'N'이면 → 출력에 비활성 명시(3단계도 계속 진행)."
+      "branches": [
+        {
+          "when": "rows = 0",
+          "then": "종료하고 \"센서 {id}는 등록되어 있지 않다\"로 답한다"
+        }
+      ]
     },
     {
       "title": "2단계 — 소속 설비",
-      "lead": "1단계의 EQP_ID로:",
-      "sql": "SELECT eqp_id, eqp_name, model_cd, vendor, use_yn\n  FROM fdc_equipment WHERE eqp_id = :eqp",
-      "notes": "- 분기: 설비도 USE_YN = 'N'이면 → \"설비 자체가 미사용\"을 출력에 우선 명시."
+      "produces": "소속 설비",
+      "lead": "1단계의 `EQP_ID`로:",
+      "sql": "SELECT eqp_id, eqp_name, model_cd, vendor, use_yn\n  FROM fdc_equipment WHERE eqp_id = :eqp"
     },
     {
       "title": "3단계 — 설비 최근 이벤트 (정비 맥락)",
-      "lead": "1단계의 EQP_ID로:",
+      "produces": "최근 설비 이벤트",
       "sql": "SELECT TO_CHAR(evt_time, 'YYYY-MM-DD') AS d, evt_type_cd, evt_label\n  FROM fdc_setup_event WHERE eqp_id = :eqp\n ORDER BY evt_time DESC FETCH FIRST 3 ROWS ONLY",
-      "notes": "- EVT_TYPE_CD는 아래 코드표로 해석. 코드표에 없는 값은 \"기타(원시값)\"로 표기 — 지어내지 않는다."
-    }
-  ],
-  "valueRules": [
-    {
-      "target": "EVT_TYPE_CD",
-      "rule": "`S`=셋업, `I`=정보 변경, `M`=정비, 그 외=기타",
-      "basis": "scaffold(데모)"
-    },
-    {
-      "target": "USE_YN",
-      "rule": "`Y`=사용, `N`=미사용",
-      "basis": "scaffold(데모)"
-    },
-    {
-      "target": "SNSR_TYPE_CD / UNIT_CD",
-      "rule": "원시값 그대로 표기 (의미 매핑 미확인)",
-      "basis": "scaffold(데모)"
+      "notes": "`EVT_TYPE_CD`의 코드→뜻 번역은 표준 db-schema 문서를 따른다."
     }
   ],
   "output": {
-    "lead": "한 문단, 다음 순서로 (없는 정보는 문장째 생략):",
-    "template": "센서 {SNSR_ID}는 {EQP_NAME}({EQP_ID}, {VENDOR} {MODEL_CD})의 {SNSR_TYPE_CD} 센서(단위 {UNIT_CD})로, 현재 {사용 중|비활성}이다. {설비가 미사용이면: 소속 설비 자체가 미사용 상태다.} 최근 설비 이벤트: {날짜} {해석된 유형}({라벨}), … . {코드표 밖 값·미확인 의미가 있으면: ⚠ {원시값}은 의미 미확인.}",
-    "exampleLabel": "예시 (시드 데이터 기준):",
-    "example": "센서 S-0004는 증착기 1호(CVD-01, AMAT CV-800)의 FLOW 센서(단위 SCCM)로, 현재 비활성이다. 소속 설비 자체가 미사용 상태다. 최근 설비 이벤트: 2026-05-11 기타(원시값 O). ⚠ SNSR_TYPE_CD=FLOW, UNIT_CD=SCCM은 의미 미확인(원시값 표기)."
+    "avoid": [
+      "비활성 '사유'를 추측한다 — 사유 컬럼은 데이터에 없다",
+      "마지막 측정값·정상 여부를 지어낸다 — 이 스킬 범위 밖이다",
+      "이벤트 코드를 '정기 점검' 등으로 구체화한다 — 라벨 이상은 모른다"
+    ],
+    "examples": [
+      {
+        "ask": "S-0004 설명해줘",
+        "answer": "센서 S-0004는 증착기 1호(CVD-01, AMAT CV-800)의 FLOW 센서(SCCM)로, 현재 비활성이다. 소속 설비 자체가 미사용 상태다. 최근 설비 이벤트: 2026-05-11 라인 점검. ⚠ SNSR_TYPE_CD=FLOW, UNIT_CD=SCCM은 의미 미확인."
+      },
+      {
+        "ask": "S-0004 어느 설비 거야?",
+        "answer": "센서 S-0004는 증착기 1호(CVD-01)에 속한다. 다만 이 설비는 현재 미사용 상태다."
+      }
+    ]
   }
 }

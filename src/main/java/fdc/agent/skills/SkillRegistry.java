@@ -132,7 +132,7 @@ public final class SkillRegistry {
         return List.of();
     };
 
-    /** (설비, 센서) 조합별 결정적 측정 통계 — 데모용(analyze 스킬 집계 결과 모사). */
+    /** (설비, 센서) 조합별 결정적 측정 통계 — 데모용(trace-reading 집계 스텝 모사). */
     private static Map<String, Object> readingStats(String eqp, String snsr) {
         long h = hash(eqp + "|" + snsr);
         double base = 50 + h % 150;

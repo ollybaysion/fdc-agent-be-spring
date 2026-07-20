@@ -61,8 +61,8 @@ fdc-agent-be-spring/
     │   └── util/Js.java  # JS bit-parity 헬퍼 (해시·반올림·수 표기)
     ├── main/resources/
     │   ├── application.yml            # env 이름 계약 유지 (DATA_SOURCE/ORACLE_*/LLM_*)
-    │   └── skills/*.spec.json + *.wiring.json   # ★ 언어 중립 — Node 판과 동일 파일
-    ├── test/java/fdc/agent/           # JUnit 31 (vitest 1:1 포팅)
+    │   └── skills/*.spec.json + *.wiring.json   # ★ spec v2 (형식 진실원 = agent-skill-foundry)
+    ├── test/java/fdc/agent/           # JUnit 32
     ├── scripts/parity.sh              # 패리티 하네스 (24케이스 diff)
     └── docs/phase1-사내-runbook.md    # Oracle 연결 절차 (사내 단계)
 ```
@@ -75,10 +75,15 @@ API 계약의 프로즈 원본은 demo-fe `API.md`+`types.ts`. Spring 판의 형
 2. **JUnit 계약 테스트** — 경로·에러코드·SSE 계약
 3. **패리티 하네스** — Node 판과 응답 diff (byte-identical 기준선)
 
-zod 스키마는 deprecated Node 판에 남아 3번의 대조군으로만 쓰인다.
+zod 스키마는 deprecated Node 판에 남아 3번의 대조군으로만 쓰인다. 단 **스킬**
+케이스는 2026-07-21 부터 대조군이 아니다 — Node 판은 spec v2 를 받지 않으므로
+거기 spec 은 v1 로 굳었다(scripts/parity.sh 주석 참고).
 
 도메인 스킬 추가는 코드 0줄 — `resources/skills/`에 spec.json+wiring.json
 2파일을 떨구면 기동 시 자동 스캔·컴파일된다(agent-skill-foundry 산출물 접합점).
+`description` 은 spec 필드가 아니라 `scope`+`focus`+`inputs` 에서 로더가
+합성하고(SkillLoader.synthesizeDescription), 툴 인자는 `spec.inputs` 가 소유한다
+(wiring 은 bind 배선만).
 단 oracle 모드 기준 — fixture 데모에서 새 테이블을 조회하려면
 `SkillRegistry.FIXTURE_SKILL_QUERY` seed 보강이 필요하다.
 
