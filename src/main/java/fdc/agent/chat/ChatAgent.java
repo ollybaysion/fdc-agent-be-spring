@@ -85,7 +85,7 @@ public class ChatAgent {
     }
 
     public AgentResult run(List<HistoryMessage> history, FormContext formContext) {
-        // 설비 조회 툴 + 도메인 스킬 툴(explain-sensor / analyze-sensor 등 자동 로드).
+        // 설비 조회 툴 + 도메인 스킬 툴(explain-sensor / trace-reading 등 자동 로드).
         List<AgentTool> tools = new ArrayList<>();
         tools.addAll(EquipmentTools.buildEquipmentTools(repo));
         tools.addAll(SkillRegistry.buildSkillTools(skillQuery));
@@ -245,7 +245,7 @@ public class ChatAgent {
                 "- 설비: " + (equipments.isEmpty() ? "(미입력)" : String.join(", ", equipments)),
                 "- PARAM_INDEX: " + (paramIndexes.isEmpty() ? "(미입력)" : String.join(", ", paramIndexes)),
                 "- 기간: " + (start.isEmpty() ? "(미입력)" : start) + " ~ " + (end.isEmpty() ? "(미입력)" : end),
-                "설비·PARAM_INDEX·기간이 모두 있으면 되묻지 말고 바로 fdc_analyze_sensor 로 분석하라"
+                "설비·PARAM_INDEX·기간이 모두 있으면 되묻지 말고 바로 fdc_trace_reading 으로 조회하라"
                         + "(PARAM_INDEX 는 센서 ID 가 아니라 param_index 인자로 그대로 넘긴다).",
                 "(미입력)이 있을 때만 무엇을 더 입력해야 하는지 되물어라.");
     }

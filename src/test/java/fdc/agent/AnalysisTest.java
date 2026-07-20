@@ -19,7 +19,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Node 판 test/analysis.test.ts 포팅 — 폼 컨텍스트 주입(PARAM_INDEX)과
- * fdc_analyze_sensor 호출 경로.
+ * fdc_trace_reading 호출 경로.
  */
 class AnalysisTest {
 
@@ -74,9 +74,9 @@ class AnalysisTest {
     }
 
     @Test
-    void LLM이_fdc_analyze_sensor를_부르면_통계_표가_실린다() {
+    void LLM이_fdc_trace_reading을_부르면_측정_집계_표가_실린다() {
         CaptureLlm llm = new CaptureLlm(List.of(
-                new LlmTurn.ToolCalls(List.of(new LlmToolCall("c1", "fdc_analyze_sensor", Map.of(
+                new LlmTurn.ToolCalls(List.of(new LlmToolCall("c1", "fdc_trace_reading", Map.of(
                         "equipment", "ETCH-01",
                         "param_index", "5",
                         "start", "2026-05-01",
@@ -84,6 +84,6 @@ class AnalysisTest {
                 new LlmTurn.Final("분석 결과입니다.")));
         AgentResult result = run(llm, "분석", null);
         assertThat(result.tables().stream()
-                .anyMatch(t -> t.title() != null && t.title().contains("측정 통계"))).isTrue();
+                .anyMatch(t -> t.title() != null && t.title().contains("구간 측정 집계"))).isTrue();
     }
 }

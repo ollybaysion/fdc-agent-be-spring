@@ -10,11 +10,15 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * skill-loader — forge-domain-skill 의 spec.json 을 에이전트 툴로 컴파일
- * (Node 판 skills/skill-loader.ts 대응). 하이브리드(C) 모델: 조회(steps[].sql)
- * 는 코드가 순서·bind 로 결정론 실행, notes/valueRules/output.template 는
- * 번역 없이 프로즈 그대로 결과에 실어 LLM 이 자연어 서술에 참고하게 한다.
- * LLM 은 SQL 텍스트를 보지 않는다.
+ * skill-loader — forge-domain-skill 의 spec.json(v2) 을 에이전트 툴로 컴파일.
+ * 하이브리드(C) 모델: 조회(steps[].sql)는 코드가 순서·bind 로 결정론 실행,
+ * 출력 지침(서술 지시·반드시 포함·avoid·examples)은 번역 없이 프로즈 그대로
+ * 결과에 실어 LLM 이 자연어 서술에 참고하게 한다. LLM 은 SQL 을 보지 않는다.
+ *
+ * <p>{@code description} 은 spec 필드가 아니라 여기서 합성된다 — 합성 결과를
+ * 공유 픽스처로 묶지 않고 소비자가 각자 만들기로 한 결정이라(foundry 설계
+ * §4-1), 아래 골격은 foundry {@code render-skill.mjs} 의 것을 그대로 옮긴
+ * 것이다. 골격이 바뀌면 같이 고칠 것.
  */
 public final class SkillLoader {
     private SkillLoader() {
@@ -25,21 +29,53 @@ public final class SkillLoader {
     public static AgentTool loadSkill(SkillSpec spec, SkillQuery query, SkillWiring wiring) {
         String toolName = spec.name().replace("-", "_");
         Map<String, Object> properties = new LinkedHashMap<>();
-        for (SkillWiring.SkillArg a : wiring.args()) {
-            properties.put(a.name(), Map.of(
-                    "type", "string",
-                    "description", a.description() != null ? a.description() : spec.argumentHint()));
+        for (SkillSpec.SkillInput p : spec.inputs()) {
+            properties.put(p.name(), Map.of("type", "string", "description", p.description()));
         }
         Map<String, Object> parameters = new LinkedHashMap<>();
         parameters.put("type", "object");
         parameters.put("properties", properties);
-        parameters.put("required", wiring.args().stream().map(SkillWiring.SkillArg::name).toList());
+        parameters.put("required", spec.inputs().stream()
+                .filter(SkillSpec.SkillInput::required)
+                .map(SkillSpec.SkillInput::name)
+                .toList());
 
         return new AgentTool(
                 toolName,
-                firstLine(spec.description()),
+                synthesizeDescription(spec),
                 parameters,
                 args -> runSkill(spec, query, wiring, args));
+    }
+
+    /** 한국어 조사 일치 — foundry 렌더러와 같은 규칙(합성 결과가 갈리지 않도록). */
+    private static boolean hasFinalConsonant(String text) {
+        String t = text.trim();
+        if (t.isEmpty()) {
+            return false;
+        }
+        char last = t.charAt(t.length() - 1);
+        if (last < 0xAC00 || last > 0xD7A3) {
+            return false;
+        }
+        return (last - 0xAC00) % 28 != 0;
+    }
+
+    /**
+     * 라우팅 문장 합성 — "언제 부르나"(트리거)만 적는다. 골격은 {@code scope.의도}
+     * 가 고르고, 도메인 어휘는 {@code focus} 한 구절뿐이다.
+     */
+    public static String synthesizeDescription(SkillSpec spec) {
+        String when = spec.inputs().stream()
+                .filter(SkillSpec.SkillInput::required)
+                .map(SkillSpec.SkillInput::name)
+                .collect(java.util.stream.Collectors.joining("·")) + " 필요";
+        if ("생성 이력".equals(spec.scope().의도())) {
+            String particle = hasFinalConsonant(spec.focus()) ? "이" : "가";
+            return "특정 " + spec.focus() + particle + " 어떻게 만들어졌는지 묻는 상황에서 호출한다 (" + when + ").";
+        }
+        String particle = hasFinalConsonant(spec.focus()) ? "을" : "를";
+        return "특정 " + spec.scope().단위() + "의 " + spec.focus() + particle
+                + " 묻는 상황에서 호출한다 (" + when + ").";
     }
 
     private static ToolResult runSkill(
@@ -88,7 +124,13 @@ public final class SkillLoader {
         return buildResult(spec, stepRows);
     }
 
-    /** 조회 사실 + 해석 규칙 + 출력 형식(프로즈)을 LLM 서술용으로 조립 + 표. */
+    /**
+     * 조회 사실 + 출력 지침(프로즈)을 LLM 서술용으로 조립 + 표.
+     *
+     * <p>v2: 형식은 강제하지 않고 <b>내용에만 바닥</b>을 둔다 — 서술 지시 +
+     * 반드시 포함({@code steps[].produces}) + 하지 말 것 + 예시. 값 의미(코드표)는
+     * 스킬에 없다: 표준 db-schema 문서 fetch 경로는 후속 과제(foundry 설계 §13).
+     */
     private static ToolResult buildResult(SkillSpec spec, List<List<Map<String, Object>>> stepRows) {
         List<String> parts = new ArrayList<>();
         parts.add("[조회 결과]");
@@ -98,15 +140,29 @@ public final class SkillLoader {
                     + (rows.isEmpty() ? "(0행)" : stringify(rows)));
         }
 
-        if (spec.valueRules() != null && !spec.valueRules().isEmpty()) {
-            parts.add("[값 해석 규칙]");
-            for (SkillSpec.SkillValueRule r : spec.valueRules()) {
-                parts.add("- " + r.target() + ": " + r.rule());
-            }
+        String particle = hasFinalConsonant(spec.focus()) ? "을" : "를";
+        parts.add("[출력 지침]");
+        parts.add("조회한 데이터로 " + spec.scope().단위() + "의 " + spec.focus() + particle
+                + " 설명한다. 정해진 형식은 없다.");
+        parts.add("체계적·논리적으로, 없는 정보는 지어내지 않는다.");
+
+        List<String> produces = spec.steps().stream()
+                .map(SkillSpec.SkillStep::produces)
+                .filter(p -> p != null && !p.isBlank())
+                .toList();
+        if (!produces.isEmpty()) {
+            parts.add("반드시 포함 (질문이 특정 항목만 묻는 게 아니면): " + String.join(" · ", produces));
         }
-        if (spec.output() != null && spec.output().template() != null) {
-            parts.add("[출력 형식 — 이 형식대로 자연어 한 문단으로 답하라]");
-            parts.add(spec.output().template());
+
+        parts.add("[하지 말 것]");
+        for (String a : spec.output().avoid()) {
+            parts.add("- " + a);
+        }
+
+        parts.add("[예시 — 모양만 참고, 값은 조회 결과로 바꾼다]");
+        for (SkillSpec.SkillExample ex : spec.output().examples()) {
+            parts.add("질문: " + ex.ask());
+            parts.add("답: " + ex.answer());
         }
 
         List<ChatTable> tables = new ArrayList<>();
@@ -131,9 +187,5 @@ public final class SkillLoader {
         } catch (Exception e) {
             return String.valueOf(value);
         }
-    }
-
-    private static String firstLine(String s) {
-        return s.split("\n", -1)[0].trim();
     }
 }

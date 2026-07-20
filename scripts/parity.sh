@@ -6,6 +6,11 @@
 #   터미널 2: ./gradlew bootRun
 # 실행: ./scripts/parity.sh   (jq 필요)
 # 기준선: 2026-07-17 — 24케이스 전부 byte-identical (SSE 는 messageId 만 정규화).
+#
+# ⚠ 2026-07-21 — 스킬 케이스는 더 이상 비교 대상이 아니다. Node 판은 deprecated
+# (2026-07-18) 라 spec v2 를 받지 않으므로, 이 스킬 spec 은 v1(valueRules·
+# output.template)이고 Spring 은 v2(produces·avoid·examples)다. 설비 조회 등
+# 비스킬 케이스는 여전히 유효한 회귀 비교다.
 NODE=http://localhost:8081
 SPRING=http://localhost:8080
 PASS=0

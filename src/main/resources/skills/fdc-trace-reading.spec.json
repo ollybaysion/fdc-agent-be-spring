@@ -1,0 +1,71 @@
+{
+  "name": "fdc-trace-reading",
+  "argumentHint": "{equipment} {param_index} {start} {end}",
+  "scope": { "단위": "센서", "카디널리티": "단일", "의도": "생성 이력" },
+  "focus": "센서 측정값",
+  "anchorTable": "FDC_SENSOR_READING",
+  "intro": "한 구간에 쌓인 측정이 어떤 조건에서 만들어졌는지 되짚는다 — 집계된 측정 분포, 그 값을 낸 설비, 수집 기간에 걸친 설비 이벤트. 센서는 이름이 아니라 PARAM_INDEX로 식별한다.",
+  "inputs": [
+    {
+      "name": "equipment",
+      "required": true,
+      "description": "측정을 낸 설비 ID (예: CVD-01)"
+    },
+    {
+      "name": "param_index",
+      "required": true,
+      "description": "센서를 특정하는 파라미터 인덱스 — 센서 이름이 아니다"
+    },
+    { "name": "start", "required": true, "description": "수집 구간 시작 시각" },
+    { "name": "end", "required": true, "description": "수집 구간 끝 시각" }
+  ],
+  "dependencies": [
+    {
+      "mcp": "agent-db-plugin",
+      "tools": ["run_query"],
+      "why": "측정·설비·이벤트 조회"
+    }
+  ],
+  "steps": [
+    {
+      "title": "1단계 — 구간 측정 집계",
+      "produces": "측정 분포(건수·평균·범위·이탈)",
+      "sql": "SELECT COUNT(*) AS CNT, ROUND(AVG(meas_val), 2) AS MEAN, ROUND(STDDEV(meas_val), 2) AS SD, ROUND(MIN(meas_val), 2) AS MINV, ROUND(MAX(meas_val), 2) AS MAXV, COUNT(CASE WHEN oo_spec_yn = 'Y' THEN 1 END) AS ANOM\n  FROM fdc_sensor_reading\n WHERE eqp_id = :eqp AND param_index = :pidx\n   AND read_time BETWEEN :start AND :end",
+      "branches": [
+        {
+          "when": "CNT = 0",
+          "then": "종료하고 \"그 기간·PARAM_INDEX로는 측정이 없다\"로 답한다 — 없는 값을 지어내지 않는다"
+        }
+      ]
+    },
+    {
+      "title": "2단계 — 측정을 낸 설비",
+      "produces": "수집 설비",
+      "lead": "입력 `equipment`로:",
+      "sql": "SELECT eqp_id, eqp_name, model_cd, vendor, use_yn\n  FROM fdc_equipment WHERE eqp_id = :eqp"
+    },
+    {
+      "title": "3단계 — 수집 기간의 설비 이벤트",
+      "produces": "수집 시점 설비 이벤트",
+      "sql": "SELECT TO_CHAR(evt_time, 'YYYY-MM-DD') AS d, evt_type_cd, evt_label\n  FROM fdc_setup_event WHERE eqp_id = :eqp\n ORDER BY evt_time DESC FETCH FIRST 3 ROWS ONLY",
+      "notes": "셋업·정비가 구간에 걸쳐 있으면 측정 분포가 그 전후로 갈릴 수 있다는 맥락으로만 쓴다."
+    }
+  ],
+  "output": {
+    "avoid": [
+      "이탈 건수로 설비 고장을 단정한다 — 원인 컬럼은 데이터에 없다",
+      "이벤트와 측정 변화를 인과로 잇는다 — 시간 인접일 뿐 근거가 없다",
+      "구간 밖 추세를 말한다 — 조회한 것은 이 구간의 집계뿐이다"
+    ],
+    "examples": [
+      {
+        "ask": "CVD-01의 PARAM_INDEX 7, 5월 측정 어떻게 나온 거야?",
+        "answer": "CVD-01(증착기 1호, AMAT CV-800)의 PARAM_INDEX 7 측정은 해당 구간 412건으로, 평균 92.4·표준편차 2.77·범위 83.2~103.5에 스펙 이탈 3건이 섞여 있다. 수집 기간에 2026-05-11 라인 점검 이벤트가 있어 분포가 그 전후로 갈릴 수 있다. ⚠ 이탈 3건의 원인은 데이터에 없다."
+      },
+      {
+        "ask": "그 구간 이탈 몇 건이야?",
+        "answer": "스펙 이탈은 3건이다(전체 412건 중)."
+      }
+    ]
+  }
+}
