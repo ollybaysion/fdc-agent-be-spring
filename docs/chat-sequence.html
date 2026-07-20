@@ -1,0 +1,1341 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>FDC 챗 — 질문에서 답변까지</title>
+<style>
+/* ── 토큰 ─────────────────────────────────────────────────
+   중립색은 살짝 청록 쪽으로 치우친 회색 — 다섯 액터 색과 같은 온도대. */
+:root {
+  color-scheme: light;
+  --bg: #fbfcfc;
+  --fg: #1b2326;
+  --muted: #5b6a70;
+  --faint: #8b989e;
+  --border: #d3dcdf;
+  --surface: #f1f5f6;
+  --sunken: #e7eef0;
+
+  --fe: #2a7b7b;
+  --fe-soft: #dcefee;
+  --be: #a85c2c;
+  --be-soft: #f6e7db;
+  --kr: #9c3f74;
+  --kr-soft: #f7e3ef;
+  --data: #2f6ba8;
+  --data-soft: #dde9f5;
+  --llm: #6a52c0;
+  --llm-soft: #e9e5f8;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "D2Coding", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0e1416;
+    --fg: #e3ecee;
+    --muted: #97a6ac;
+    --faint: #6d7c82;
+    --border: #2f3b3f;
+    --surface: #161f22;
+    --sunken: #1d282b;
+
+    --fe: #63c3bb;
+    --fe-soft: #14302f;
+    --be: #dd9155;
+    --be-soft: #33241a;
+    --kr: #e08bbb;
+    --kr-soft: #331b2a;
+    --data: #6aa9e0;
+    --data-soft: #14263a;
+    --llm: #a693e8;
+    --llm-soft: #241f36;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0e1416;
+  --fg: #e3ecee;
+  --muted: #97a6ac;
+  --faint: #6d7c82;
+  --border: #2f3b3f;
+  --surface: #161f22;
+  --sunken: #1d282b;
+
+  --fe: #63c3bb;
+  --fe-soft: #14302f;
+  --be: #dd9155;
+  --be-soft: #33241a;
+  --kr: #e08bbb;
+  --kr-soft: #331b2a;
+  --data: #6aa9e0;
+  --data-soft: #14263a;
+  --llm: #a693e8;
+  --llm-soft: #241f36;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #fbfcfc;
+  --fg: #1b2326;
+  --muted: #5b6a70;
+  --faint: #8b989e;
+  --border: #d3dcdf;
+  --surface: #f1f5f6;
+  --sunken: #e7eef0;
+
+  --fe: #2a7b7b;
+  --fe-soft: #dcefee;
+  --be: #a85c2c;
+  --be-soft: #f6e7db;
+  --kr: #9c3f74;
+  --kr-soft: #f7e3ef;
+  --data: #2f6ba8;
+  --data-soft: #dde9f5;
+  --llm: #6a52c0;
+  --llm-soft: #e9e5f8;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 17px;
+  line-height: 1.62;
+  -webkit-text-size-adjust: 100%;
+}
+.page { max-width: 1440px; margin: 0 auto; padding: 1.4rem 1.5rem 4rem; }
+
+/* 줄바꿈: 한글은 어절(띄어쓰기) 단위로만 끊는다 — 기본값은 글자 단위라 낱말이 잘린다 */
+body { word-break: keep-all; overflow-wrap: break-word; }
+pre, code { word-break: normal; }
+/* 문단은 끝줄 외톨이 방지, 짧은 제목·라벨은 좌우 균형 */
+p, li, .what { text-wrap: pretty; }
+h1, .who, .tit, .rb-t, .flabel, .arrow .label { text-wrap: balance; }
+
+/* ── 머리: 제목 + 범례 + 전체 펼치기 ── */
+.masthead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 1rem;
+  padding-bottom: 0.9rem;
+}
+h1 { font-size: 1.32rem; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+.masthead .sub { margin: 0; color: var(--muted); font-size: 0.9rem; }
+.masthead .sub code { font-size: 0.95em; }
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: center;
+  padding: 0 0 1.1rem;
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+.legend .item { display: flex; align-items: center; gap: 0.4rem; }
+.legend .swatch { width: 22px; height: 2px; background: currentColor; }
+.legend .swatch.dashed {
+  background: repeating-linear-gradient(to right, currentColor 0 6px, transparent 6px 11px);
+}
+.legend .fe { color: var(--fe); }
+.legend .be { color: var(--be); }
+.legend .kr { color: var(--kr); }
+.legend .data { color: var(--data); }
+.legend .llm { color: var(--llm); }
+.legend .hint { color: var(--fg); }
+#expand-all {
+  margin-left: auto;
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.15rem 0.8rem;
+  cursor: pointer;
+}
+#expand-all:hover { color: var(--fg); border-color: var(--muted); }
+#expand-all:focus-visible { outline: 2px solid var(--fe); outline-offset: 2px; }
+
+/* ── 무대: 레인 5개 ── */
+.stage { position: relative; }
+.lanes {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 0 0.5rem;
+  padding: 0.35rem 0 0.9rem;
+  background: linear-gradient(var(--bg) 74%, transparent);
+}
+.lane {
+  border: 1.5px solid;
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 0.5rem 0.7rem;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.lane .who { font-weight: 700; font-size: 0.95rem; }
+.lane .what { font-size: 0.8rem; color: var(--muted); line-height: 1.5; }
+.lane .what b { color: var(--fg); display: block; margin-bottom: 0.1rem; }
+.lane .what b.k { display: inline; margin: 0; }
+.lane .what .ln { display: block; text-wrap: balance; }
+.lane.l-fe { grid-column: 1 / 3; border-color: var(--fe); }
+.lane.l-fe .who { color: var(--fe); }
+.lane.l-be { grid-column: 3 / 5; border-color: var(--be); }
+.lane.l-be .who { color: var(--be); }
+.lane.l-kr { grid-column: 5 / 7; border-color: var(--kr); }
+.lane.l-kr .who { color: var(--kr); }
+.lane.l-data { grid-column: 7 / 9; border-color: var(--data); }
+.lane.l-data .who { color: var(--data); }
+.lane.l-llm { grid-column: 9 / 11; border-color: var(--llm); }
+.lane.l-llm .who { color: var(--llm); }
+
+/* 라이프라인 5개 — 레인 중심 = 10 / 30 / 50 / 70 / 90% */
+.flow { position: relative; display: flex; flex-direction: column; gap: 1.1rem; }
+.lifeline {
+  position: absolute;
+  top: -0.4rem;
+  bottom: -0.4rem;
+  width: 0;
+  border-left: 1.5px dashed var(--border);
+  z-index: 0;
+}
+.lifeline.p1 { left: 10%; }
+.lifeline.p2 { left: 30%; }
+.lifeline.p3 { left: 50%; }
+.lifeline.p4 { left: 70%; }
+.lifeline.p5 { left: 90%; }
+
+.row {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  align-items: end;
+}
+.row.tight { margin-top: -0.75rem; }
+
+/* ── 메시지 화살표 ── */
+.arrow { position: relative; padding-bottom: 13px; text-align: center; }
+.arrow .line { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: currentColor; }
+.arrow.ret .line {
+  background: repeating-linear-gradient(to right, currentColor 0 7px, transparent 7px 13px);
+}
+.arrow .head {
+  position: absolute;
+  bottom: 1px;
+  width: 9px;
+  height: 9px;
+  border-top: 2px solid currentColor;
+  border-right: 2px solid currentColor;
+}
+.arrow.dir-r .head { right: 0; transform: translateY(50%) rotate(45deg); }
+.arrow.dir-l .head { left: 0; transform: translateY(50%) rotate(-135deg); }
+.arrow .label {
+  display: inline-block;
+  background: var(--bg);
+  padding: 0 0.55rem;
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+  font-weight: 700;
+  line-height: 1.5;
+}
+.arrow .label .num {
+  display: inline-block;
+  min-width: 1.4em;
+  margin-right: 0.4rem;
+  padding: 0 0.32em;
+  border-radius: 5px;
+  /* background에 currentColor를 쓰면 같은 요소의 color(=--bg)로 해석돼 사라진다 */
+  background: var(--c);
+  color: var(--bg);
+  text-align: center;
+  font-size: 0.78rem;
+}
+.arrow .label em { font-style: normal; font-weight: 400; color: var(--muted); }
+.arrow { color: var(--c); }
+.arrow.c-fe { --c: var(--fe); }
+.arrow.c-be { --c: var(--be); }
+.arrow.c-kr { --c: var(--kr); }
+.arrow.c-data { --c: var(--data); }
+.arrow.c-llm { --c: var(--llm); }
+.arrow.faded { --c: var(--faint); }
+
+/* 레인 중심 사이 구간 — 그리드 선 2/4/6/8/10 = 10/30/50/70/90% */
+.at-fe-be { grid-column: 2 / 4; }
+.at-be-kr { grid-column: 4 / 6; }
+.at-be-data { grid-column: 4 / 8; }
+.at-be-llm { grid-column: 4 / 10; }
+
+/* ── 내부 처리 박스 (self) ── */
+.self {
+  border: 1.5px dashed;
+  border-radius: 11px;
+  padding: 0.65rem 0.95rem;
+  font-size: 0.89rem;
+}
+.self .tit { font-weight: 700; }
+.self ul { margin: 0.25rem 0 0; padding-left: 1.05rem; color: var(--muted); }
+.self li { margin: 0.12rem 0; }
+.self li b { color: var(--fg); }
+.self.on-fe {
+  grid-column: 2 / 6;
+  margin-right: 5%;
+  border-color: var(--fe);
+  background: var(--fe-soft);
+  --c: var(--fe);
+}
+.self.on-fe .tit { color: var(--fe); }
+.self.on-be {
+  grid-column: 4 / 9;
+  margin-right: 4%;
+  border-color: var(--be);
+  background: var(--be-soft);
+  --c: var(--be);
+}
+.self.on-be .tit { color: var(--be); }
+.self.on-data {
+  grid-column: 8 / 11;
+  border-color: var(--data);
+  background: var(--data-soft);
+  --c: var(--data);
+}
+.self.on-data .tit { color: var(--data); }
+/* 원문을 넓게 보여줘야 하는 박스 */
+.self.wide { grid-column: 3 / 11; margin-right: 0; }
+
+/* ── 화살표에 붙는 해설 + 원문 ── */
+.att { display: flex; flex-direction: column; gap: 0.4rem; align-items: flex-start; }
+/* 원문 상자는 화살표 폭보다 넓게 — JSON은 좁은 칸에서 못 읽는다 */
+.att.at-fe-be { grid-column: 2 / 8; }
+.att.at-be-kr { grid-column: 4 / 10; }
+.att.at-be-data { grid-column: 4 / 11; }
+.att.at-be-llm { grid-column: 4 / 11; }
+.note {
+  font-size: 0.86rem;
+  color: var(--muted);
+  background: var(--bg);
+  border-left: 2px solid var(--border);
+  padding: 0.1rem 0 0.1rem 0.6rem;
+}
+.note b { color: var(--fg); font-weight: 600; }
+.note code, .self code, .arrow code, .edge code { font-family: var(--font-mono); font-size: 0.92em; }
+
+.rawbox { width: 100%; }
+.rawbox > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+  font-family: var(--font-mono);
+  font-size: 0.79rem;
+  font-weight: 700;
+  color: var(--c, var(--muted));
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.1rem 0.7rem;
+}
+.rawbox > summary::-webkit-details-marker { display: none; }
+.rawbox > summary::before { content: "▸"; }
+.rawbox[open] > summary::before { content: "▾"; }
+.rawbox > summary:hover { border-color: var(--c, var(--muted)); }
+.rawbox > summary:focus-visible { outline: 2px solid var(--c, var(--muted)); outline-offset: 2px; }
+.rawbox pre {
+  margin: 0.5rem 0 0;
+  padding: 0.7rem 0.9rem;
+  background: var(--sunken);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-family: var(--font-mono);
+  font-size: 0.79rem;
+  line-height: 1.62;
+  overflow-x: auto;
+  color: var(--fg);
+}
+.rawbox .cap {
+  margin: 0.35rem 0 0;
+  font-size: 0.81rem;
+  color: var(--muted);
+}
+.rawbox .cap b { color: var(--fg); font-weight: 600; }
+
+/* ── 프레임 — loop / alt ── */
+.frame {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  padding: 1.55rem 0 1rem;
+}
+.frame > .flabel {
+  position: absolute;
+  top: -0.72rem;
+  left: 16px;
+  background: var(--bg);
+  padding: 0 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.79rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.frame > .flabel span { color: var(--faint); font-weight: 400; }
+
+/* ── 시작 배너 — 이 문서의 출발점 ── */
+.opening {
+  position: relative;
+  z-index: 1;
+  margin: 1.6rem 0 0.4rem;
+  padding: 1.1rem 1rem 1.25rem;
+  text-align: center;
+  background: var(--bg);
+  border-top: 2px solid var(--border);
+  border-bottom: 2px solid var(--border);
+}
+.op-pill {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+  background: var(--sunken);
+  border-radius: 999px;
+  padding: 2px 15px;
+}
+.op-q {
+  margin: 0.55rem 0 0.3rem;
+  font-size: 1.7rem;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: -0.015em;
+  color: var(--fe);
+  text-wrap: balance;
+}
+.op-ctx { margin: 0; font-size: 0.94rem; color: var(--muted); }
+.op-ctx code { font-family: var(--font-mono); }
+
+/* ── 절차서 카드 — 스킬 본문(항상 보임) ── */
+.runbook {
+  grid-column: 3 / 11;
+  border: 1.5px solid var(--kr);
+  border-radius: 14px;
+  background: var(--kr-soft);
+  padding: 0.9rem 1.1rem 1rem;
+  --c: var(--kr);
+}
+.rb-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem 0.8rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+.rb-name { font-family: var(--font-mono); font-weight: 700; font-size: 1rem; color: var(--kr); }
+.rb-arg {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--kr);
+  border: 1px solid var(--kr);
+  border-radius: 999px;
+  padding: 0 0.6em;
+}
+.rb-kind { margin-left: auto; font-size: 0.8rem; color: var(--muted); }
+.rb-step {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 0.75rem;
+  padding: 0.75rem 0 0.2rem;
+  border-bottom: 1px dashed var(--border);
+}
+.rb-n {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--kr);
+  color: var(--bg);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rb-t { margin: 0 0 0.35rem; font-weight: 700; font-size: 0.95rem; }
+.rb-in, .rb-run {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 1px 8px;
+  margin-left: 0.35rem;
+  white-space: nowrap;
+}
+.rb-in { color: var(--kr); border: 1px dashed var(--kr); }
+.rb-run {
+  color: var(--data);
+  border: 1px solid var(--data);
+  display: inline-block;
+  text-decoration: none;
+}
+.rb-run:hover { background: var(--data-soft); }
+.rb-run:focus-visible { outline: 2px solid var(--data); outline-offset: 2px; }
+/* 레인 머리가 sticky라 앵커 이동 시 가려지지 않게 */
+[id^="m"] { scroll-margin-top: 7rem; }
+:target .arrow .label { box-shadow: 0 0 0 3px var(--data-soft); border-radius: 6px; }
+.rb-sql {
+  margin: 0 0 0.35rem;
+  padding: 0.55rem 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.55;
+  overflow-x: auto;
+}
+.rb-branch { margin: 0 0 0.3rem; font-size: 0.82rem; color: var(--muted); }
+.rb-branch code { font-family: var(--font-mono); font-size: 0.92em; }
+.rb-tail {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 0.75rem 1.5rem;
+  padding-top: 0.8rem;
+}
+.rb-cell .rb-t { font-size: 0.88rem; }
+.rb-rule, .rb-tpl { margin: 0 0 0.25rem; font-size: 0.83rem; color: var(--muted); }
+.rb-rule code { font-family: var(--font-mono); color: var(--fg); }
+.rb-tpl { font-family: var(--font-mono); font-size: 0.78rem; line-height: 1.6; }
+
+/* ── 답변 배너 — 이 문서의 도착점 ── */
+.closing {
+  position: relative;
+  z-index: 1;
+  margin: 1.6rem 0 0.2rem;
+  padding: 1.2rem 1.2rem 1.3rem;
+  background: var(--bg);
+  border-top: 2px solid var(--border);
+  border-bottom: 2px solid var(--border);
+  text-align: center;
+}
+.ans-text {
+  margin: 0.6rem auto 0.5rem;
+  max-width: 60ch;
+  font-size: 1.22rem;
+  line-height: 1.75;
+  text-align: left;
+  text-wrap: pretty;
+}
+.ans-text b { font-weight: 700; }
+.ans-text u, .ans-legend u {
+  text-decoration: none;
+  border-bottom: 2px solid;
+  padding-bottom: 1px;
+}
+.ans-text u.v, .ans-legend u.v { border-color: var(--data); }
+.ans-text u.m, .ans-legend u.m { border-color: var(--kr); }
+.ans-legend { margin: 0 auto 0.9rem; max-width: 60ch; text-align: left; font-size: 0.82rem; color: var(--muted); }
+.ans-extra {
+  max-width: 60ch;
+  margin: 0 auto 0.4rem;
+  text-align: left;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.ans-tag {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--fe);
+  background: var(--fe-soft);
+  border-radius: 999px;
+  padding: 1px 9px;
+  margin-right: 0.4rem;
+}
+.qchip {
+  display: inline-block;
+  font-size: 0.8rem;
+  color: var(--fe);
+  border: 1px solid var(--fe);
+  border-radius: 999px;
+  padding: 1px 10px;
+  margin: 0.15rem 0.3rem 0.15rem 0;
+}
+.ans-raw { max-width: 60ch; margin: 0.8rem auto 0; text-align: left; }
+
+/* ── 끝 스트립 ── */
+.edge {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.87rem;
+  color: var(--muted);
+}
+.edge .pill {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 0.77rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 11px;
+  background: var(--sunken);
+}
+.edge .rule { flex: 1; border-top: 1px solid var(--border); }
+
+/* 좁은 화면: 레인 5개를 유지한 채 다이어그램만 가로 스크롤 */
+@media (max-width: 1400px) {
+  .scroll { overflow-x: auto; padding-bottom: 0.5rem; }
+  .stage { min-width: 1240px; }
+  .lanes { position: static; background: none; }
+}
+@media (max-width: 640px) {
+  body { font-size: 16px; }
+  .page { padding: 1rem 0.9rem 3rem; }
+}
+
+#theme-toggle {
+  position: fixed;
+  top: 0.7rem;
+  right: 0.7rem;
+  z-index: 10;
+  font: inherit;
+  font-size: 0.82rem;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.2rem 0.7rem;
+  cursor: pointer;
+}
+#theme-toggle:hover { color: var(--fg); }
+#theme-toggle:focus-visible { outline: 2px solid var(--fe); outline-offset: 2px; }
+
+@media print {
+  #theme-toggle, #expand-all { display: none; }
+  .page { max-width: none; padding: 0; }
+  .lanes { position: static; background: none; }
+  .scroll { overflow: visible; }
+  body { font-size: 11pt; }
+}
+</style>
+</head>
+<body>
+<button id="theme-toggle" type="button" aria-label="테마 전환"></button>
+<div class="page">
+
+<div class="masthead">
+  <h1>FDC 챗 — 질문에서 답변까지</h1>
+  <p class="sub">질문 하나가 답변이 되기까지 오가는 메시지 · 사실(데이터)과 의미(지식)가
+    각각 어디서 오는지까지</p>
+</div>
+
+<div class="legend">
+  <span class="item fe"><span class="swatch"></span> 대시보드</span>
+  <span class="item be"><span class="swatch"></span> 에이전트</span>
+  <span class="item kr"><span class="swatch"></span> 지식 레지스트리</span>
+  <span class="item data"><span class="swatch"></span> 데이터 공급</span>
+  <span class="item llm"><span class="swatch"></span> LLM</span>
+  <span class="item"><span class="swatch"></span> 실선 = 요청</span>
+  <span class="item"><span class="swatch dashed"></span> 점선 = 응답</span>
+  <span class="item hint">▸ 칩을 누르면 그 메시지의 <b>실제 원문</b></span>
+  <button id="expand-all" type="button" data-open="false">원문 전부 펼치기</button>
+</div>
+
+<div class="scroll">
+<div class="stage" role="group"
+     aria-label="대시보드, 에이전트, 지식 레지스트리, 데이터 공급, LLM 게이트웨이 사이의 챗 요청 시퀀스 다이어그램">
+
+  <div class="lanes">
+    <div class="lane l-fe">
+      <div class="who">대시보드</div>
+      <div class="what"><b>사용자 화면</b><span class="ln">질문과 폼 입력을 받아 보내고,
+        돌아온 답변과 표를 그린다</span></div>
+    </div>
+    <div class="lane l-be">
+      <div class="who">에이전트</div>
+      <div class="what"><b>질문을 처리하는 쪽</b><span class="ln">무엇을 조회할지 정해 실행하고,
+        모은 것으로 답을 완성한다</span></div>
+    </div>
+    <div class="lane l-kr">
+      <div class="who">지식 레지스트리</div>
+      <div class="what"><b>지식 보관소</b><span class="ln"><b class="k">절차 지식</b> — 스킬 = 툴</span><span
+          class="ln"><b class="k">도메인 지식</b> — 코드·컬럼 뜻</span><span class="ln">이 둘을 관리한다</span></div>
+    </div>
+    <div class="lane l-data">
+      <div class="who">데이터 공급</div>
+      <div class="what"><b>실제 값</b><span class="ln">설비·센서 데이터를 꺼내온다
+        (사내 DB 또는 사람이 준 파일)</span></div>
+    </div>
+    <div class="lane l-llm">
+      <div class="who">LLM 게이트웨이</div>
+      <div class="what"><b>언어 모델</b><span class="ln">어떤 툴을 부를지 고르고,
+        조회 결과를 문장으로 옮긴다</span></div>
+    </div>
+  </div>
+
+  <div class="flow">
+    <span class="lifeline p1" aria-hidden="true"></span>
+    <span class="lifeline p2" aria-hidden="true"></span>
+    <span class="lifeline p3" aria-hidden="true"></span>
+    <span class="lifeline p4" aria-hidden="true"></span>
+    <span class="lifeline p5" aria-hidden="true"></span>
+
+    <div class="edge"><span class="pill">기동 시</span><span class="rule"></span>
+      <span>대화가 시작되기 전에, 레지스트리의 <b>절차 지식(스킬)</b>이 <b>에이전트의 툴</b>이 된다</span></div>
+
+    <div class="row">
+      <div class="arrow c-kr dir-r at-be-kr">
+        <span class="label">지식 내려받기 <em>· 미리 통째로</em></span>
+        <span class="line"></span><span class="head"></span>
+      </div>
+    </div>
+    <div class="row tight">
+      <div class="arrow c-kr ret dir-l at-be-kr">
+        <span class="label">절차 지식(스킬) + 도메인 지식(용어)</span>
+        <span class="line"></span><span class="head"></span>
+      </div>
+    </div>
+    <div class="row tight">
+      <div class="att at-be-kr">
+        <p class="note">레지스트리는 두 종류의 지식을 <b>한 곳에서 관리한다</b>.
+          <b>절차 지식</b> — "이런 질문이 오면 이 순서로 조회하라"는 스킬. 이게 곧 <b>에이전트의 툴</b>이 된다.
+          <b>도메인 지식</b> — 코드값·컬럼이 무슨 뜻인지(코드표·용어집).
+          답변의 근거는 전부 여기서 나온다.</p>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="self on-be wide">
+        <div class="tit">절차 지식(스킬) → 툴 카탈로그</div>
+        <ul>
+          <li><b>스킬 하나 = 툴 하나.</b> 레지스트리에서 받은 스킬을 그대로 컴파일한다 —
+            코드를 고칠 필요가 없어서, 스킬이 늘면 에이전트가 할 줄 아는 일도 늘어난다</li>
+          <li>이 질문에 쓰이는 스킬은 <b><code>explain-sensor</code></b> — 툴 이름
+            <code>fdc_explain_sensor</code>, 인자 <code>snsr_id</code> 하나</li>
+          <li>툴 정의에 실리는 건 <b>이름·설명·인자</b>뿐이다 — 조회 절차(SQL)는 스킬 본문에 남고,
+            모델에게 가지 않는다</li>
+        </ul>
+        <details class="rawbox"><summary>원문 — 이 질문에 쓰인 툴 정의</summary>
+<pre>{ "type": "function",
+  "function": {
+    "name": "fdc_explain_sensor",
+    "description": "센서 하나를 자연어로 설명한다 — FDC_SENSOR에서 시작해 정의된 순서·분기대로",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "snsr_id": { "type": "string", "description": "센서 ID (예: S-0001)" } },
+      "required": [ "snsr_id" ] } } }</pre>
+          <p class="cap"><b>description은 모델이 툴을 고르는 유일한 근거</b>다. 설명이 어중간하게
+            끊긴 건 <b>스킬 설명의 첫 줄만 싣기 때문</b> — 그래서 첫 줄이 그 자체로 완결돼야 한다.
+            SQL은 이 정의 어디에도 없다.</p>
+        </details>
+      </div>
+    </div>
+
+    <div class="opening">
+      <span class="op-pill">시작</span>
+      <p class="op-q">“이 센서에 대해 설명해줘”</p>
+      <p class="op-ctx">폼 입력 — 설비 <code>ETCH-01</code> · 챔버 <code>CH-A</code> · 센서 <code>S-0007</code></p>
+    </div>
+
+    <div class="row">
+      <div class="arrow c-fe dir-r at-fe-be">
+        <span class="label"><span class="num">1</span>POST /api/fdc/v1/chat <em>· 질문 + 폼</em></span>
+        <span class="line"></span><span class="head"></span>
+      </div>
+    </div>
+    <div class="row tight">
+      <div class="att at-fe-be">
+        <p class="note">질문 문장만으로는 어느 센서인지 알 수 없다 — <b>"이 센서" = S-0007이라는 건
+          사용자가 폼에서 고른 값이 알려준다.</b> 챔버는 센서 목록을 좁히는 데만 쓰이고
+          프롬프트에는 실리지 않는다.</p>
+        <details class="rawbox"><summary>원문 — FE가 보낸 요청 본문</summary>
+<pre>POST /api/fdc/v1/chat
+Content-Type: application/json
+
+{
+  "messages": [
+    { "role": "user", "content": "이 센서에 대해 설명해줘" }
+  ],
+  "context": [
+    { "equipment": "ETCH-01",
+      "chambers": [ { "name": "CH-A",
+                      "sensors": [ { "name": "S-0007" } ] } ] }
+  ],
+  "timeRange": { "start": "", "end": "" }
+}</pre>
+          <p class="cap">폼 값은 프롬프트의 <code>[분석 대상 — 사용자 폼 입력]</code> 블록이 되어
+            <b>마지막 user 메시지 뒤에 덧붙는다</b>. 센서 칸은 <code>PARAM_INDEX</code>로 찍히는데
+            explain 툴의 인자 이름은 <code>snsr_id</code>다 — 같은 값을 두 이름으로 부르는 지점이라
+            이어주는 건 모델의 몫이다.</p>
+        </details>
+      </div>
+    </div>
+
+    <div class="frame">
+      <span class="flabel">툴 호출 1회 <span>[이 질문은 한 번으로 끝난다 · 모델이 툴을 더 부르면 이 구간이 되풀이 — 최대 4번]</span></span>
+
+      <div class="row">
+        <div class="arrow c-be dir-r at-be-llm">
+          <span class="label"><span class="num">2</span>POST /chat/completions
+            <em>· messages + tools · temperature 0 · stream false</em></span>
+          <span class="line"></span><span class="head"></span>
+        </div>
+      </div>
+      <div class="row tight">
+        <div class="att at-be-llm">
+          <p class="note">LLM이 보는 건 툴의 <b>이름·설명·인자</b>뿐. 툴 목록이 비면
+            <code>tools</code>·<code>tool_choice</code>를 <b>키째로 생략</b>한다.</p>
+          <details class="rawbox"><summary>원문 — 1회차 요청 본문</summary>
+<pre>POST {LLM_BASE_URL}/chat/completions
+Authorization: Bearer {LLM_API_KEY}
+Content-Type: application/json
+
+{
+  "model": "{LLM_MODEL}",
+  "messages": [
+    { "role": "system", "content": "당신은 반도체 설비 이상탐지(FDC) 분석 어시스턴트다. 설비/챔버/센서 데이터가 필요하면 반드시 제공된 툴을 호출해 사실을 확인하고, 조회하지 않은 값은 지어내지 않는다. … 답변은 한국어로 간결하게 작성하고, 서식은 Markdown(GFM)으로 한다 …" },
+    { "role": "user", "content": "이 센서에 대해 설명해줘\n\n[분석 대상 — 사용자 폼 입력]\n- 설비: ETCH-01\n- PARAM_INDEX: S-0007\n- 기간: (미입력) ~ (미입력)\n설비·PARAM_INDEX·기간이 모두 있으면 되묻지 말고 바로 fdc_analyze_sensor 로 분석하라(PARAM_INDEX 는 센서 ID 가 아니라 param_index 인자로 그대로 넘긴다).\n(미입력)이 있을 때만 무엇을 더 입력해야 하는지 되물어라." }
+  ],
+  "tools": [ … 위 툴 정의 … ],
+  "tool_choice": "auto",
+  "temperature": 0,
+  "stream": false
+}</pre>
+            <p class="cap">폼 블록이 <b>별도 system이 아니라 user 메시지 꼬리</b>에 붙어 있는 것에 주목 —
+              약한 모델도 "요청의 일부"로 확실히 읽게 하려는 배치다.</p>
+          </details>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="arrow c-llm ret dir-l at-be-llm">
+          <span class="label"><span class="num">3</span>tool_calls <em>· fdc_explain_sensor(snsr_id="S-0007")</em></span>
+          <span class="line"></span><span class="head"></span>
+        </div>
+      </div>
+      <div class="row tight">
+        <div class="att at-be-llm">
+          <p class="note">모델은 답을 쓰지 않고 <b>툴을 지목한다</b> — 이름 하나와 인자 한 벌.</p>
+          <details class="rawbox"><summary>원문 — LLM의 툴 호출 응답</summary>
+<pre>{
+  "choices": [
+    { "message": {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          { "id": "call_ba7f21",
+            "type": "function",
+            "function": {
+              "name": "fdc_explain_sensor",
+              "arguments": "{\"snsr_id\":\"S-0007\"}"
+            } } ] } } ]
+}</pre>
+            <p class="cap">모델이 한 일은 <b>툴 하나를 고르고 폼의 값을 그 툴의 인자 이름으로 옮긴 것</b>뿐이다.
+              <b><code>arguments</code>는 객체가 아니라 JSON 문자열</b>이라 에이전트가 한 번 더 파싱한다.
+              <code>id</code>는 뒤에 결과를 짝맞출 키다.</p>
+          </details>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="arrow c-kr dir-r at-be-kr">
+          <span class="label"><span class="num">4</span>스킬 본문 요청 <em>· explain-sensor</em></span>
+          <span class="line"></span><span class="head"></span>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="arrow c-kr ret dir-l at-be-kr">
+          <span class="label"><span class="num">5</span>스킬 본문 <em>· 조회 절차 3단계 + 해석 규칙 + 출력 형식</em></span>
+          <span class="line"></span><span class="head"></span>
+        </div>
+      </div>
+      <div class="row tight">
+        <div class="att at-be-kr">
+          <p class="note">모델이 본 건 툴의 <b>이름·설명·인자</b>뿐이었다. <b>어떻게 조회하는지는 이 본문에 적혀 있고,
+            모델은 이 본문을 보지 않는다</b> — 사람이 정해둔 절차가 그대로 실행된다.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="runbook">
+          <div class="rb-head">
+            <span class="rb-name">explain-sensor</span>
+            <span class="rb-arg">인자 · snsr_id = "S-0007"</span>
+            <span class="rb-kind">절차 지식 — 레지스트리가 관리하는 문서</span>
+          </div>
+
+          <div class="rb-step">
+            <span class="rb-n">1</span>
+            <div class="rb-body">
+              <p class="rb-t">센서 기본 정보 <a class="rb-run" href="#m6" title="6번 메시지로 이동">↓ 6</a></p>
+              <pre class="rb-sql">SELECT snsr_id, eqp_id, snsr_type_cd, unit_cd, use_yn
+  FROM fdc_sensor WHERE snsr_id = :id</pre>
+              <p class="rb-branch">0행이면 "등록되어 있지 않다"고 답하고 끝 ·
+                <code>USE_YN = 'N'</code>이면 출력에 비활성 명시(3단계도 계속)</p>
+            </div>
+          </div>
+
+          <div class="rb-step">
+            <span class="rb-n">2</span>
+            <div class="rb-body">
+              <p class="rb-t">소속 설비 <span class="rb-in">1단계의 EQP_ID로</span>
+                <a class="rb-run" href="#m8" title="8번 메시지로 이동">↓ 8</a></p>
+              <pre class="rb-sql">SELECT eqp_id, eqp_name, model_cd, vendor, use_yn
+  FROM fdc_equipment WHERE eqp_id = :eqp</pre>
+              <p class="rb-branch">설비도 <code>USE_YN = 'N'</code>이면 "설비 자체가 미사용"을 우선 명시</p>
+            </div>
+          </div>
+
+          <div class="rb-step">
+            <span class="rb-n">3</span>
+            <div class="rb-body">
+              <p class="rb-t">설비 최근 이벤트 (정비 맥락) <span class="rb-in">1단계의 EQP_ID로</span>
+                <a class="rb-run" href="#m10" title="10번 메시지로 이동">↓ 10</a></p>
+              <pre class="rb-sql">SELECT TO_CHAR(evt_time,'YYYY-MM-DD') AS d, evt_type_cd, evt_label
+  FROM fdc_setup_event WHERE eqp_id = :eqp
+ ORDER BY evt_time DESC FETCH FIRST 3 ROWS ONLY</pre>
+              <p class="rb-branch">EVT_TYPE_CD는 코드표로 해석 · 코드표에 없는 값은 "기타"로 — 지어내지 않는다</p>
+            </div>
+          </div>
+
+          <div class="rb-tail">
+            <div class="rb-cell">
+              <p class="rb-t">값 해석 규칙</p>
+              <p class="rb-rule"><code>EVT_TYPE_CD</code> S=셋업 · I=정보 변경 · M=정비 · 그 외=기타</p>
+              <p class="rb-rule"><code>USE_YN</code> Y=사용 · N=미사용</p>
+            </div>
+            <div class="rb-cell">
+              <p class="rb-t">출력 형식</p>
+              <p class="rb-tpl">센서 {SNSR_ID}는 {EQP_NAME}({EQP_ID}, {VENDOR} {MODEL_CD})의
+                {SNSR_TYPE_CD} 센서(단위 {UNIT_CD})로, 현재 {사용 중|비활성}이다. …</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="frame">
+        <span class="flabel">본문에 적힌 절차 — 순서대로</span>
+
+        <div class="row" id="m6">
+          <div class="arrow c-data dir-r at-be-data">
+            <span class="label"><span class="num">6</span>1단계 · 센서 기본 정보 <em>· :id = "S-0007"</em></span>
+            <span class="line"></span><span class="head"></span>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="arrow c-data ret dir-l at-be-data">
+            <span class="label"><span class="num">7</span>1행 <em>· EQP_ID=ETCH-01 · PRESSURE · mTorr · 사용 중</em></span>
+            <span class="line"></span><span class="head"></span>
+          </div>
+        </div>
+        <div class="row tight">
+          <div class="att at-be-data">
+            <p class="note">스킬은 <b>그 값이 어디서 오는지 모른다</b> —
+              같은 요청이 이 경계 뒤에서 <b>사내 DB 직접 조회</b>든, <b>사람이 한 번 받아둔 파일</b>이든,
+              데모용 샘플이든 똑같이 처리되고, 돌아오는 건 언제나 같은 모양의 행이다.</p>
+            <details class="rawbox"><summary>원문 — 1단계 조회와 결과</summary>
+<pre>SELECT snsr_id, eqp_id, snsr_type_cd, unit_cd, use_yn
+  FROM fdc_sensor WHERE snsr_id = :id
+
+binds  :id = "S-0007"          ← 툴 인자에서
+
+rows   [ { "SNSR_ID": "S-0007", "EQP_ID": "ETCH-01",
+           "SNSR_TYPE_CD": "PRESSURE", "UNIT_CD": "mTorr", "USE_YN": "Y" } ]</pre>
+              <p class="cap">값은 <b>네임드 바인드</b>로만 들어간다(문자열 조립 없음) + 계정은 read-only.
+                이 결과의 <code>EQP_ID</code>가 다음 두 단계의 입력이 된다.</p>
+            </details>
+          </div>
+        </div>
+
+        <div class="row" id="m8">
+          <div class="arrow c-data dir-r at-be-data">
+            <span class="label"><span class="num">8</span>2단계 · 소속 설비 <em>· :eqp ← 1단계의 EQP_ID</em></span>
+            <span class="line"></span><span class="head"></span>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="arrow c-data ret dir-l at-be-data">
+            <span class="label"><span class="num">9</span>1행 <em>· 식각기 1호 · LAM EtcherX-2000 · 사용 중</em></span>
+            <span class="line"></span><span class="head"></span>
+          </div>
+        </div>
+        <div class="row tight">
+          <div class="att at-be-data">
+            <details class="rawbox"><summary>원문 — 2단계 조회와 결과</summary>
+<pre>SELECT eqp_id, eqp_name, model_cd, vendor, use_yn
+  FROM fdc_equipment WHERE eqp_id = :eqp
+
+binds  :eqp = "ETCH-01"        ← 1단계 결과에서
+
+rows   [ { "EQP_ID": "ETCH-01", "EQP_NAME": "식각기 1호",
+           "MODEL_CD": "EtcherX-2000", "VENDOR": "LAM", "USE_YN": "Y" } ]</pre>
+              <p class="cap">본문의 분기 조건(<i>설비도 미사용이면 우선 명시</i>)은 <b>여기서 걸리지 않는다</b> —
+                설비가 사용 중이라 그 문장은 답변에서 빠진다.</p>
+            </details>
+          </div>
+        </div>
+
+        <div class="row" id="m10">
+          <div class="arrow c-data dir-r at-be-data">
+            <span class="label"><span class="num">10</span>3단계 · 최근 이벤트 3건 <em>· :eqp ← 1단계의 EQP_ID</em></span>
+            <span class="line"></span><span class="head"></span>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="arrow c-data ret dir-l at-be-data">
+            <span class="label"><span class="num">11</span>1행 <em>· 2026-05-01 "S" · 레시피 셋업</em></span>
+            <span class="line"></span><span class="head"></span>
+          </div>
+        </div>
+        <div class="row tight">
+          <div class="att at-be-data">
+            <p class="note">세 단계가 <b>본문에 적힌 순서 그대로</b> 돌았다. 단계 사이의 값 전달은 코드가 하고,
+              모델은 이 연쇄에 관여하지 않는다.</p>
+            <details class="rawbox"><summary>원문 — 3단계 조회와 결과</summary>
+<pre>SELECT TO_CHAR(evt_time,'YYYY-MM-DD') AS d, evt_type_cd, evt_label
+  FROM fdc_setup_event WHERE eqp_id = :eqp
+ ORDER BY evt_time DESC FETCH FIRST 3 ROWS ONLY
+
+binds  :eqp = "ETCH-01"        ← 1단계 결과에서
+
+rows   [ { "D": "2026-05-01", "EVT_TYPE_CD": "S", "EVT_LABEL": "레시피 셋업" } ]</pre>
+              <p class="cap">코드값 <code>"S"</code>가 무슨 뜻인지는 여기 없다 — 그건 다음 화살표가 가져온다.</p>
+            </details>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="arrow c-kr dir-r at-be-kr">
+          <span class="label"><span class="num">12</span>도메인 지식 조회 <em>· 이번 결과에 쓰인 컬럼·코드만</em></span>
+          <span class="line"></span><span class="head"></span>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="arrow c-kr ret dir-l at-be-kr">
+          <span class="label"><span class="num">13</span>의미 <em>· EVT_TYPE_CD 코드표 · USE_YN · 단위</em></span>
+          <span class="line"></span><span class="head"></span>
+        </div>
+      </div>
+      <div class="row tight">
+        <div class="att at-be-kr">
+          <p class="note"><b>데이터는 값을, 지식 레지스트리는 그 값의 뜻을 준다.</b> <code>EVT_TYPE_CD = "S"</code>가
+            무엇인지는 DB 어디에도 없다 — 코드표는 레지스트리에서 온다.</p>
+          <details class="rawbox"><summary>원문 — 지식 레지스트리가 돌려주는 지식의 형태</summary>
+<pre>{
+  "table": "FDC_SETUP_EVENT",
+  "columns": {
+    "EVT_TYPE_CD": {
+      "description": {
+        "text": "설비 셋업·변경 이벤트의 유형 코드",
+        "tier": "confirmed",
+        "evidence": "fdc-app/src/event/EventType.java:22",
+        "by": "hong", "at": "2026-07-14"
+      },
+      "codes": { "S": "셋업", "I": "정보 변경", "M": "정비" }
+    }
+  }
+}</pre>
+            <p class="cap">값마다 <b>확신 단계</b>가 붙는다 — 빈칸 → 추정 → <b>확정</b>(사람이 확인해 올린 것).
+              답변에는 <b>확정된 것만</b> 쓴다. 지금은 이 의미가 스킬 파일 안에 임시로 적혀 있고,
+              레지스트리가 붙으면 <b>스킬은 지식을 참조만</b> 하게 된다.</p>
+          </details>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="self on-be wide">
+          <div class="tit">결과 조립 — 사실 + 의미를 한 덩어리로</div>
+          <ul>
+            <li><code>[조회 결과]</code> 스텝별 행 + <code>[값 해석 규칙]</code> 코드표 +
+              <code>[출력 형식]</code> 템플릿을 <b>프로즈</b>로 이어붙인다</li>
+            <li>같은 행을 <b>표(tables)</b>로도 따로 모아둔다 — 이건 <b>LLM에 보내지 않고</b>
+              <code>done</code>에 실어 화면으로 직행한다</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="arrow c-be dir-r at-be-llm">
+          <span class="label"><span class="num">14</span>POST /chat/completions
+            <em>· assistant.tool_calls + tool 결과 (전체 맥락 재전송)</em></span>
+          <span class="line"></span><span class="head"></span>
+        </div>
+      </div>
+      <div class="row tight">
+        <div class="att at-be-llm">
+          <p class="note">게이트웨이는 무상태다 — 1회차 메시지 <b>전부</b>에 두 줄이 더 붙어 다시 간다.
+            루프를 돌수록 맥락이 길어지고 그만큼 비용도 는다.</p>
+          <details class="rawbox"><summary>원문 — messages 꼬리에 붙는 두 메시지</summary>
+<pre>{ "role": "assistant",
+  "content": "",
+  "tool_calls": [
+    { "id": "call_ba7f21", "type": "function",
+      "function": { "name": "fdc_explain_sensor",
+                    "arguments": "{\"snsr_id\":\"S-0007\"}" } } ] },
+
+{ "role": "tool",
+  "tool_call_id": "call_ba7f21",
+  "content": "[조회 결과]
+              - 1단계 — 센서 기본 정보: [{\"SNSR_ID\":\"S-0007\",\"EQP_ID\":\"ETCH-01\",\"SNSR_TYPE_CD\":\"PRESSURE\",\"UNIT_CD\":\"mTorr\",\"USE_YN\":\"Y\"}]
+              - 2단계 — 소속 설비: [{\"EQP_ID\":\"ETCH-01\",\"EQP_NAME\":\"식각기 1호\",\"MODEL_CD\":\"EtcherX-2000\",\"VENDOR\":\"LAM\",\"USE_YN\":\"Y\"}]
+              - 3단계 — 설비 최근 이벤트 (정비 맥락): [{\"D\":\"2026-05-01\",\"EVT_TYPE_CD\":\"S\",\"EVT_LABEL\":\"레시피 셋업\"}]
+              [값 해석 규칙]
+              - EVT_TYPE_CD: `S`=셋업, `I`=정보 변경, `M`=정비, 그 외=기타
+              - USE_YN: `Y`=사용, `N`=미사용
+              - SNSR_TYPE_CD / UNIT_CD: 센서값 그대로 표기 (의미 매핑 미확인)
+              [출력 형식 — 이 형식대로 자연어 한 문단으로 답하라]
+              센서 {SNSR_ID}는 {EQP_NAME}({EQP_ID}, {VENDOR} {MODEL_CD})의 {SNSR_TYPE_CD} 센서(단위 {UNIT_CD})로, 현재 {사용 중|비활성}이다. …" }
+
+  ※ 실제로는 한 줄짜리 문자열(\n 포함)이다 — 읽기 쉽게 줄을 접어 표시했다.</pre>
+            <p class="cap">받은 <code>tool_calls</code>를 <b>그대로 되돌려 붙여야</b> 게이트웨이가 결과의 짝을
+              찾는다. assistant의 <code>content</code>는 null이 아니라 빈 문자열로 나가고, tool 메시지엔
+              <b>툴 이름이 실리지 않는다</b> — 짝맞춤은 <code>tool_call_id</code>만으로.
+              LLM이 보는 "사실"은 결국 이 <code>content</code> 문자열 하나가 전부다.</p>
+          </details>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="arrow c-llm ret dir-l at-be-llm">
+          <span class="label"><span class="num">15</span>최종 텍스트 (Markdown)
+            <em>· finishReason "stop"</em></span>
+          <span class="line"></span><span class="head"></span>
+        </div>
+      </div>
+      <div class="row tight">
+        <div class="att at-be-llm">
+          <p class="note">툴 결과만으로 답이 되어 <b>여기서 끝났다</b> — 이 질문은 툴 호출 한 번이면 충분하다.
+            (설비 비교처럼 조회가 더 필요한 질문이면 모델이 툴을 또 불러 위 구간이 되풀이된다.)</p>
+          <details class="rawbox"><summary>원문 — 최종 답변 응답</summary>
+<pre>{
+  "choices": [
+    { "message": {
+        "role": "assistant",
+        "content": "센서 **S-0007**은 식각기 1호(ETCH-01, LAM EtcherX-2000)의 PRESSURE 센서(단위 mTorr)로, 현재 **사용 중**입니다. 최근 설비 이벤트는 2026-05-01 셋업(레시피 셋업)입니다. ⚠ 센서 종류·단위 코드의 표준 의미는 확인되지 않아 값 그대로 표기했습니다."
+      } } ]
+}</pre>
+            <p class="cap">답변의 <b>사실은 데이터에서, 뜻은 지식에서</b> 왔다 — 코드 <code>S</code>가 "셋업"으로
+              풀린 건 값 해석 규칙을 따른 것이고, 규칙에 없는 <code>PRESSURE</code>·<code>mTorr</code>는
+              <b>"의미 미확인"으로 남았다</b>(지식 레지스트리가 채울 자리).
+              모델이 한 건 형식 맞춰 문장으로 옮긴 일뿐이다.</p>
+          </details>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="arrow c-be dir-r at-be-llm">
+        <span class="label"><span class="num">16</span>POST /chat/completions
+          <em>· 후속 질문 요청 · tools 없이 3메시지</em></span>
+        <span class="line"></span><span class="head"></span>
+      </div>
+    </div>
+    <div class="row tight">
+      <div class="att at-be-llm">
+        <p class="note">답변은 이미 확정 — 이건 추천 칩을 만들기 위한 <b>별도 호출</b>이다.</p>
+        <details class="rawbox"><summary>원문 — 후속 질문 요청</summary>
+<pre>{
+  "model": "{LLM_MODEL}",
+  "messages": [
+    { "role": "user",      "content": "이 센서에 대해 설명해줘\n\n[분석 대상 — 사용자 폼 입력]\n- 설비: ETCH-01\n- PARAM_INDEX: S-0007 …" },
+    { "role": "assistant", "content": "센서 **S-0007**은 식각기 1호(ETCH-01, LAM EtcherX-2000)의 …" },
+    { "role": "user",      "content": "위 답변에 이어 사용자가 이 설비 분석 맥락에서 물을 만한 후속 질문 3개를 한국어로 제안하라. JSON 문자열 배열로만, 다른 설명 없이. 예: [\"...\", \"...\", \"...\"]" }
+  ],
+  "temperature": 0,
+  "stream": false
+}</pre>
+          <p class="cap">본 히스토리엔 <code>tool_calls</code>가 섞여 있어, 후속 질문용으로는
+            <b>깨끗한 3메시지</b>를 새로 만들어 보낸다.</p>
+        </details>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="arrow c-llm ret dir-l at-be-llm">
+        <span class="label"><span class="num">17</span>["…", "…", "…"] <em>· 추천 질문 3개</em></span>
+        <span class="line"></span><span class="head"></span>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="arrow c-be ret dir-l at-fe-be">
+        <span class="label"><span class="num">18</span>200 text/event-stream <em>· 스트림 시작</em></span>
+        <span class="line"></span><span class="head"></span>
+      </div>
+    </div>
+
+    <div class="frame">
+      <span class="flabel">반복 <span>[글자 수만큼 · 15ms 간격]</span></span>
+      <div class="row">
+        <div class="arrow c-be ret dir-l at-fe-be">
+          <span class="label"><span class="num">19</span>event: token <em>· 한 글자씩</em></span>
+          <span class="line"></span><span class="head"></span>
+        </div>
+      </div>
+      <div class="row tight">
+        <div class="att at-fe-be">
+          <p class="note">생성은 이미 끝났다 — 스트리밍은 완성된 텍스트를 흘려보내는 연기(演技)다.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="arrow c-be ret dir-l at-fe-be">
+        <span class="label"><span class="num">20</span>event: done <em>· 표 · 추천질문 번들</em></span>
+        <span class="line"></span><span class="head"></span>
+      </div>
+    </div>
+    <div class="row tight">
+      <div class="att at-fe-be">
+        <details class="rawbox"><summary>원문 — SSE 스트림</summary>
+<pre>event: token
+data: {"content":"센"}
+
+event: token
+data: {"content":"서"}
+
+… 글자 수만큼 반복 …
+
+event: done
+data: { …  아래 “답변”의 원문 JSON 전문 … }</pre>
+          <p class="cap">문장은 <b>한 글자씩</b>, 표·추천질문은 <b>마지막 한 번</b>에 실려 온다.</p>
+        </details>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="self on-fe">
+        <div class="tit">화면 갱신</div>
+        <ul>
+          <li>token을 이어붙여 Markdown(GFM)으로 렌더</li>
+          <li>done의 표를 패널로, 추천 질문을 칩으로</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="closing">
+      <span class="op-pill">답변</span>
+      <p class="ans-text">센서 <b>S-0007</b>은 <u class="v">식각기 1호</u>(<u class="v">ETCH-01</u>,
+        <u class="v">LAM EtcherX-2000</u>)의 <u class="v">PRESSURE</u> 센서(단위 <u class="v">mTorr</u>)로,
+        현재 <u class="m">사용 중</u>입니다. 최근 설비 이벤트는 <u class="v">2026-05-01</u>
+        <u class="m">셋업</u>(<u class="v">레시피 셋업</u>)입니다.
+        ⚠ 센서 종류·단위 코드의 표준 의미는 확인되지 않아 값 그대로 표기했습니다.</p>
+      <p class="ans-legend"><u class="v">밑줄 파랑</u> = 데이터에서 온 값 ·
+        <u class="m">밑줄 자주</u> = 지식에서 온 뜻 · 나머지 문장 = 모델이 쓴 것</p>
+      <div class="ans-extra">
+        <span class="ans-tag">표 3개</span> 1단계 센서 기본 정보 · 2단계 소속 설비 · 3단계 최근 이벤트
+      </div>
+      <div class="ans-extra">
+        <span class="ans-tag">추천 질문</span>
+        <span class="qchip">이 센서의 최근 측정값 추이는 어떤가요?</span>
+        <span class="qchip">ETCH-01의 다른 센서도 사용 중인가요?</span>
+        <span class="qchip">2026-05-01 레시피 셋업 때 무엇이 바뀌었나요?</span>
+      </div>
+      <details class="rawbox ans-raw"><summary>원문 — 화면에 도착한 JSON 전문</summary>
+<pre>{
+  "messageId": "msg_lz3k9x",
+  "finishReason": "stop",
+  "text": "센서 **S-0007**은 식각기 1호(ETCH-01, LAM EtcherX-2000)의 PRESSURE 센서(단위 mTorr)로, 현재 **사용 중**입니다. 최근 설비 이벤트는 2026-05-01 셋업(레시피 셋업)입니다. ⚠ 센서 종류·단위 코드의 표준 의미는 확인되지 않아 값 그대로 표기했습니다.",
+
+  "tables": [
+    { "title": "1단계 — 센서 기본 정보",
+      "columns": [ "SNSR_ID", "EQP_ID", "SNSR_TYPE_CD", "UNIT_CD", "USE_YN" ],
+      "rows": [ { "SNSR_ID": "S-0007", "EQP_ID": "ETCH-01",
+                  "SNSR_TYPE_CD": "PRESSURE", "UNIT_CD": "mTorr", "USE_YN": "Y" } ] },
+
+    { "title": "2단계 — 소속 설비",
+      "columns": [ "EQP_ID", "EQP_NAME", "MODEL_CD", "VENDOR", "USE_YN" ],
+      "rows": [ { "EQP_ID": "ETCH-01", "EQP_NAME": "식각기 1호",
+                  "MODEL_CD": "EtcherX-2000", "VENDOR": "LAM", "USE_YN": "Y" } ] },
+
+    { "title": "3단계 — 설비 최근 이벤트 (정비 맥락)",
+      "columns": [ "D", "EVT_TYPE_CD", "EVT_LABEL" ],
+      "rows": [ { "D": "2026-05-01", "EVT_TYPE_CD": "S", "EVT_LABEL": "레시피 셋업" } ] }
+  ],
+
+  "recommendQuestion": [ "이 센서의 최근 측정값 추이는 어떤가요?",
+                         "ETCH-01의 다른 센서도 사용 중인가요?",
+                         "2026-05-01 레시피 셋업 때 무엇이 바뀌었나요?" ]
+}</pre>
+        <p class="cap">문장(<code>text</code>)은 한 글자씩 흘러온 것을 이어붙인 것이고,
+          <b>표(<code>tables</code>)는 LLM을 거치지 않은 원본 행</b>이 그대로 실려 온다 —
+          화면의 표에 적힌 <code>"S"</code>는 답변 문장에서 "셋업"으로 풀려 있다.</p>
+      </details>
+    </div>
+
+    <div class="edge"><span class="pill">끝</span><span class="rule"></span>
+      <span>사실은 <b>데이터 공급</b>에서, 뜻은 <b>지식 레지스트리</b>에서, 문장만 <b>LLM</b>에서 —
+        셋이 갈라져 있어야 "지어내지 않는다"가 지켜진다</span></div>
+  </div>
+
+</div>
+</div>
+
+</div>
+<script>
+(function () {
+  "use strict";
+  var root = document.documentElement;
+  var KEY = "html-doc-theme";
+  var saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) { /* file:// 제약 등 — 무시 */ }
+  if (saved === "light" || saved === "dark") root.setAttribute("data-theme", saved);
+  var btn = document.getElementById("theme-toggle");
+  function effective() {
+    return root.getAttribute("data-theme") ||
+      (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  }
+  function paint() { btn.textContent = effective() === "dark" ? "라이트 ☀" : "다크 ☾"; }
+  btn.addEventListener("click", function () {
+    var next = effective() === "dark" ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem(KEY, next); } catch (e) { /* 무시 */ }
+    paint();
+  });
+  paint();
+
+  // 원문 일괄 펼치기/접기
+  var all = document.getElementById("expand-all");
+  all.addEventListener("click", function () {
+    var open = all.getAttribute("data-open") !== "true";
+    Array.prototype.forEach.call(document.querySelectorAll("details.rawbox"), function (d) {
+      d.open = open;
+    });
+    all.setAttribute("data-open", String(open));
+    all.textContent = open ? "원문 전부 접기" : "원문 전부 펼치기";
+  });
+})();
+</script>
+</body>
+</html>
