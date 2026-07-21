@@ -114,4 +114,48 @@ class ChatAgentApiTest {
         // 카탈로그 항목: 내용 없이 존재만 알린다.
         assertThat(text).contains("레시피 STEP").contains("내용 미첨부");
     }
+
+    @Test
+    void 조회할_수_없는_데이터는_done에_dataRequests로_요청된다() throws Exception {
+        // 설비/센서 ID 없이 특정 데이터를 요구 → mock LLM 이 request_data 를 호출하고,
+        // 에이전트가 done 페이로드에 요청 카드로 실어 보낸다.
+        MockHttpServletResponse res = chat("센서 목록 알려줘");
+        assertThat(res.getStatus()).isEqualTo(200);
+        String body = res.getContentAsString(StandardCharsets.UTF_8);
+
+        JsonNode done = SseTestSupport.donePayload(body);
+        assertThat(done).isNotNull();
+        assertThat(done.path("dataRequests").isArray()).isTrue();
+
+        JsonNode req = done.path("dataRequests").get(0);
+        assertThat(req.path("queryKey").asText()).isEqualTo("sensor_list");
+        assertThat(req.path("label").asText()).isEqualTo("챔버별 센서 목록");
+        assertThat(req.path("sql").asText()).contains("fdc_sensor_master");
+        List<String> cols = new ArrayList<>();
+        req.path("columns").forEach(c -> cols.add(c.asText()));
+        assertThat(cols).contains("CHAMBER", "SENSOR_ID", "SENSOR_NAME");
+
+        // 사용자에게 조달을 요청하는 안내 문구도 스트림된다.
+        assertThat(SseTestSupport.tokenText(body)).contains("데이터 요청을 등록");
+    }
+
+    @Test
+    void 이미_제공된_데이터는_dataRequests로_다시_요청하지_않는다() throws Exception {
+        // 같은 queryKey(recipe_steps) 스냅샷을 동봉하면, mock 이 request_data 를 불러도
+        // 에이전트가 queryKey 로 억제해 요청 카드를 내보내지 않는다(왕복 종료).
+        String body = """
+                {"messages":[{"role":"user","content":"레시피 STEP 알려줘"}],
+                 "dataSnapshots":[
+                   {"queryKey":"recipe_steps","label":"레시피 STEP 구성","capturedAt":"2026-07-22T00:00",
+                    "columns":["STEP_NO","STEP_NAME"],"rowCount":1,"rows":[["1","가열"]]}
+                 ]}
+                """;
+        MockHttpServletResponse res = chatWithBody(body);
+        assertThat(res.getStatus()).isEqualTo(200);
+
+        JsonNode done = SseTestSupport.donePayload(res.getContentAsString(StandardCharsets.UTF_8));
+        assertThat(done).isNotNull();
+        // 이미 제공됐으므로 요청 카드가 나가지 않는다(필드 생략).
+        assertThat(done.has("dataRequests")).isFalse();
+    }
 }

@@ -110,7 +110,8 @@ public class ChatController {
                 messageId,
                 result.finishReason(),
                 result.tables().isEmpty() ? null : result.tables(),
-                result.recommendQuestion().isEmpty() ? null : result.recommendQuestion());
+                result.recommendQuestion().isEmpty() ? null : result.recommendQuestion(),
+                result.dataRequests().isEmpty() ? null : result.dataRequests());
 
         res.setStatus(200);
         res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
