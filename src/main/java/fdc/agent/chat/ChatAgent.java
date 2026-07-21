@@ -3,6 +3,7 @@ package fdc.agent.chat;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import fdc.agent.chat.AgentTool.ToolResult;
+import fdc.agent.contract.ChatDataSnapshot;
 import fdc.agent.contract.ChatTable;
 import fdc.agent.data.EquipmentRepo;
 import fdc.agent.llm.LlmTypes.LlmClient;
@@ -30,6 +31,9 @@ import java.util.regex.Pattern;
 public class ChatAgent {
 
     private static final int MAX_STEPS = 4;
+
+    /** 붙여넣은 스냅샷 한 건에서 프롬프트에 펴는 최대 행수(큰 표가 프롬프트를 삼키지 않게). */
+    private static final int MAX_SNAPSHOT_ROWS = 200;
 
     private static final String SYSTEM_PROMPT = String.join(" ",
             "당신은 반도체 설비 이상탐지(FDC) 분석 어시스턴트다.",
@@ -85,6 +89,11 @@ public class ChatAgent {
     }
 
     public AgentResult run(List<HistoryMessage> history, FormContext formContext) {
+        return run(history, formContext, null);
+    }
+
+    public AgentResult run(
+            List<HistoryMessage> history, FormContext formContext, List<ChatDataSnapshot> dataSnapshots) {
         // 설비 조회 툴 + 도메인 스킬 툴(explain-sensor / trace-reading 등 자동 로드).
         List<AgentTool> tools = new ArrayList<>();
         tools.addAll(EquipmentTools.buildEquipmentTools(repo));
@@ -102,10 +111,11 @@ public class ChatAgent {
                         "assistant".equals(m.role()) ? "assistant" : "user",
                         m.content() != null ? m.content() : ""))
                 .toList());
-        // 폼 컨텍스트는 별도 system 메시지가 아니라 마지막 사용자 메시지에 덧붙인다
-        // — 약한 모델도 요청의 일부로 확실히 반영(값이 다 있으면 바로 분석 툴 호출).
-        String formNote = formatFormContext(formContext);
-        if (formNote != null) {
+        // 폼 컨텍스트 + 사용자가 붙여넣은 데이터 스냅샷을 별도 system 메시지가 아니라
+        // 마지막 사용자 메시지에 덧붙인다 — 약한 모델도 요청의 일부로 확실히 반영
+        // (값이 다 있으면 바로 분석, 붙여넣은 데이터가 있으면 그걸 근거로).
+        String note = joinNotes(formatFormContext(formContext), formatDataSnapshots(dataSnapshots));
+        if (note != null) {
             int lastUser = -1;
             for (int i = hist.size() - 1; i >= 0; i--) {
                 if ("user".equals(hist.get(i).role())) {
@@ -116,9 +126,9 @@ public class ChatAgent {
             if (lastUser >= 0) {
                 LlmMessage m = hist.get(lastUser);
                 hist.set(lastUser, LlmMessage.of(m.role(),
-                        (m.content() != null ? m.content() : "") + "\n\n" + formNote));
+                        (m.content() != null ? m.content() : "") + "\n\n" + note));
             } else {
-                hist.add(LlmMessage.of("user", formNote));
+                hist.add(LlmMessage.of("user", note));
             }
         }
         messages.addAll(hist);
@@ -248,5 +258,59 @@ public class ChatAgent {
                 "설비·PARAM_INDEX·기간이 모두 있으면 되묻지 말고 바로 fdc_trace_reading 으로 조회하라"
                         + "(PARAM_INDEX 는 센서 ID 가 아니라 param_index 인자로 그대로 넘긴다).",
                 "(미입력)이 있을 때만 무엇을 더 입력해야 하는지 되물어라.");
+    }
+
+    /** 비지 않은 노트만 빈 줄로 이어 붙인다. 전부 비면 null(주입 안 함). */
+    static String joinNotes(String... notes) {
+        List<String> present = new ArrayList<>();
+        for (String n : notes) {
+            if (n != null && !n.isBlank()) {
+                present.add(n);
+            }
+        }
+        return present.isEmpty() ? null : String.join("\n\n", present);
+    }
+
+    /**
+     * 사용자가 데이터 패널에서 붙여넣어 요청에 실은 스냅샷을 LLM 이 읽을 한 블록으로.
+     * 아무것도 없으면 null(주입 안 함).
+     *
+     * <p>📌(rows 있음)은 전문을 표로 펴서 주입해 LLM 이 값을 직접 근거로 삼게 하고,
+     * 카탈로그 항목(rows 없음)은 "이런 표가 있다"만 알린다 — 내용이 아직 안 왔으므로
+     * 지어내지 말고 필요하면 사용자에게 요청하라는 신호다. 큰 표는 행수를 캡한다.
+     */
+    static String formatDataSnapshots(List<ChatDataSnapshot> snapshots) {
+        if (snapshots == null || snapshots.isEmpty()) {
+            return null;
+        }
+        List<String> parts = new ArrayList<>();
+        parts.add("[제공된 데이터 — 사용자 첨부]");
+        parts.add("아래는 사용자가 직접 조회해 붙여넣은 데이터다. 이 값을 근거로 답하고, "
+                + "여기 없는 값은 지어내지 않는다.");
+        for (ChatDataSnapshot s : snapshots) {
+            String label = s.label() != null && !s.label().isBlank() ? s.label() : s.queryKey();
+            List<String> cols = s.columns() != null ? s.columns() : List.of();
+            List<List<String>> rows = s.rows();
+            int rowCount = s.rowCount() != null ? s.rowCount() : (rows != null ? rows.size() : 0);
+            String head = "- " + label + " (" + String.join(", ", cols) + "), " + rowCount + "행";
+            if (rows == null || rows.isEmpty()) {
+                parts.add(head + " — 내용 미첨부(필요하면 사용자에게 요청).");
+                continue;
+            }
+            parts.add(head + ":");
+            parts.add("  " + String.join(" | ", cols));
+            int shown = Math.min(rows.size(), MAX_SNAPSHOT_ROWS);
+            for (int i = 0; i < shown; i++) {
+                List<String> cells = new ArrayList<>();
+                for (String c : rows.get(i)) {
+                    cells.add(c == null ? "" : c);
+                }
+                parts.add("  " + String.join(" | ", cells));
+            }
+            if (rows.size() > shown) {
+                parts.add("  … (" + rows.size() + "행 중 처음 " + shown + "행만 표시)");
+            }
+        }
+        return String.join("\n", parts);
     }
 }
