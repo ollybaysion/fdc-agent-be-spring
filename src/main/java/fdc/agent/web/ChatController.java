@@ -7,6 +7,7 @@ import fdc.agent.chat.ChatAgent.FormContext;
 import fdc.agent.chat.ChatAgent.HistoryMessage;
 import fdc.agent.config.ApiException;
 import fdc.agent.config.AppProps;
+import fdc.agent.contract.ChatDataSnapshot;
 import fdc.agent.contract.ChatDonePayload;
 import jakarta.servlet.ServletOutputStream;
 import jakarta.servlet.http.HttpServletResponse;
@@ -44,7 +45,8 @@ public class ChatController {
     public record ChatBody(
             List<HistoryMessage> messages,
             List<FormContext.ContextRow> context,
-            FormContext.TimeRange timeRange) {
+            FormContext.TimeRange timeRange,
+            List<ChatDataSnapshot> dataSnapshots) {
     }
 
     private final ChatAgent agent;
@@ -89,7 +91,8 @@ public class ChatController {
         try {
             result = agent.run(messages, new FormContext(
                     body != null ? body.context() : null,
-                    body != null ? body.timeRange() : null));
+                    body != null ? body.timeRange() : null),
+                    body != null ? body.dataSnapshots() : null);
         } catch (Exception err) {
             log.error("chat agent error", err);
             int statusCode = err instanceof ApiException api ? api.status() : 500;
