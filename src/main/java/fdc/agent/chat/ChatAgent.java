@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import fdc.agent.chat.AgentTool.ToolResult;
 import fdc.agent.contract.ChatDataSnapshot;
 import fdc.agent.contract.ChatTable;
+import fdc.agent.contract.DataRequest;
 import fdc.agent.data.EquipmentRepo;
 import fdc.agent.llm.LlmTypes.LlmClient;
 import fdc.agent.llm.LlmTypes.LlmMessage;
@@ -14,9 +15,11 @@ import fdc.agent.llm.LlmTypes.LlmTurn;
 import fdc.agent.skills.SkillQuery;
 import fdc.agent.skills.SkillRegistry;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -35,12 +38,18 @@ public class ChatAgent {
     /** 붙여넣은 스냅샷 한 건에서 프롬프트에 펴는 최대 행수(큰 표가 프롬프트를 삼키지 않게). */
     private static final int MAX_SNAPSHOT_ROWS = 200;
 
+    /** 조달 요청 툴 이름 — 실 조회 툴과 달리 실행하지 않고 요청으로 수집한다. */
+    private static final String REQUEST_DATA_TOOL = "request_data";
+
     private static final String SYSTEM_PROMPT = String.join(" ",
             "당신은 반도체 설비 이상탐지(FDC) 분석 어시스턴트다.",
             "설비/챔버/센서 데이터가 필요하면 반드시 제공된 툴을 호출해 사실을 확인하고,",
             "조회하지 않은 값은 지어내지 않는다.",
             "센서 데이터 분석에는 설비·PARAM_INDEX·기간이 모두 필요하다 — 폼 입력이나 대화에서",
             "이 중 빠진 게 있으면 추측하지 말고 무엇을 더 입력해야 하는지 사용자에게 되물어라.",
+            "DB 에 직접 조회할 수 없어 필요한 데이터를 얻지 못하면, 값을 지어내지 말고 request_data 툴로",
+            "사용자에게 조달을 요청하라 — 안정적인 snake_case queryKey 와, 가능하면 실행할 SQL 을 함께 준다.",
+            "이미 [제공된 데이터]로 받은 것(같은 queryKey)은 다시 요청하지 않는다.",
             // FE(MessageBubble)는 답변을 Markdown(GFM)으로 렌더한다 — 서식을 명시하지
             // 않으면 굵게/목록 등이 깨진다. raw HTML 은 sanitize 로 제거되므로 쓰지 않는다.
             "답변은 한국어로 간결하게 작성하고, 서식은 Markdown(GFM)으로 한다 —",
@@ -73,9 +82,13 @@ public class ChatAgent {
         }
     }
 
-    /** finishReason: "stop" | "length". recommendQuestion 은 실패/미지원 시 빈 배열. */
+    /**
+     * finishReason: "stop" | "length". recommendQuestion 은 실패/미지원 시 빈 배열.
+     * dataRequests 는 이 응답에서 조달을 요청한 데이터(없으면 빈 배열).
+     */
     public record AgentResult(
-            String text, List<ChatTable> tables, String finishReason, List<String> recommendQuestion) {
+            String text, List<ChatTable> tables, String finishReason,
+            List<String> recommendQuestion, List<DataRequest> dataRequests) {
     }
 
     private final LlmClient llm;
@@ -100,9 +113,23 @@ public class ChatAgent {
         tools.addAll(SkillRegistry.buildSkillTools(skillQuery));
         Map<String, AgentTool> toolByName = new LinkedHashMap<>();
         tools.forEach(t -> toolByName.put(t.name(), t));
-        List<LlmToolSpec> specs = tools.stream()
+        List<LlmToolSpec> specs = new ArrayList<>(tools.stream()
                 .map(t -> new LlmToolSpec(t.name(), t.description(), t.parameters()))
-                .toList();
+                .toList());
+        // 조달 요청 툴 — 실행 툴이 아니라 "이 데이터가 필요하다"를 수집하는 특수 툴.
+        specs.add(requestDataSpec());
+
+        // 이미 제공된 스냅샷의 queryKey — 같은 키의 요청은 억제(왕복 종료 보장).
+        Set<String> suppliedKeys = new HashSet<>();
+        if (dataSnapshots != null) {
+            for (ChatDataSnapshot s : dataSnapshots) {
+                if (s.queryKey() != null && !s.queryKey().isBlank()) {
+                    suppliedKeys.add(s.queryKey());
+                }
+            }
+        }
+        List<DataRequest> dataRequests = new ArrayList<>();
+        Set<String> requestedKeys = new HashSet<>();
 
         List<LlmMessage> messages = new ArrayList<>();
         messages.add(LlmMessage.of("system", SYSTEM_PROMPT));
@@ -139,12 +166,18 @@ public class ChatAgent {
             LlmTurn turn = llm.next(messages, specs);
             if (turn instanceof LlmTurn.Final fin) {
                 List<String> recommendQuestion = suggestFollowups(messages, fin.content());
-                return new AgentResult(fin.content(), tables, "stop", recommendQuestion);
+                return new AgentResult(fin.content(), tables, "stop", recommendQuestion, dataRequests);
             }
 
             List<LlmToolCall> toolCalls = ((LlmTurn.ToolCalls) turn).toolCalls();
             messages.add(LlmMessage.assistantToolCalls(toolCalls));
             for (LlmToolCall call : toolCalls) {
+                if (REQUEST_DATA_TOOL.equals(call.name())) {
+                    String ack = collectDataRequest(
+                            call.arguments(), suppliedKeys, requestedKeys, dataRequests);
+                    messages.add(LlmMessage.toolResult(call.id(), call.name(), ack));
+                    continue;
+                }
                 AgentTool tool = toolByName.get(call.name());
                 ToolResult result = tool != null
                         ? tool.execute().run(call.arguments())
@@ -166,7 +199,87 @@ public class ChatAgent {
         }
         return new AgentResult(
                 lastTool != null ? lastTool : "요청을 완료하지 못했습니다. 좀 더 구체적으로 질문해 주세요.",
-                tables, "length", List.of());
+                tables, "length", List.of(), dataRequests);
+    }
+
+    /**
+     * request_data 툴 호출을 조달 요청으로 수집한다(실행하지 않는다). 이미 제공된
+     * 스냅샷과 같은 queryKey 이거나 이번 응답에서 이미 요청한 키면 카드로 내보내지
+     * 않는다 — 왕복이 끝나게 하는 억제다. LLM 에 되먹일 확인 문구를 돌려준다.
+     */
+    private static String collectDataRequest(
+            Map<String, Object> args, Set<String> suppliedKeys,
+            Set<String> requestedKeys, List<DataRequest> out) {
+        DataRequest req = parseDataRequest(args);
+        if (req == null) {
+            return "데이터 요청이 형식에 맞지 않아 등록하지 못했습니다(queryKey·label 필요).";
+        }
+        if (suppliedKeys.contains(req.queryKey()) || !requestedKeys.add(req.queryKey())) {
+            return "이미 제공되었거나 요청된 데이터입니다: " + req.label() + " — 그대로 분석을 이어가라.";
+        }
+        out.add(req);
+        return "데이터 요청을 등록했습니다: " + req.label()
+                + ". 사용자가 결과를 붙여넣으면 이어서 분석합니다. 없는 값은 지어내지 않습니다.";
+    }
+
+    /** request_data 인자(느슨하게 수용)를 DataRequest 로. queryKey·label 없으면 null. */
+    private static DataRequest parseDataRequest(Map<String, Object> args) {
+        if (args == null) {
+            return null;
+        }
+        String queryKey = asTrimmed(args.get("queryKey"));
+        String label = asTrimmed(args.get("label"));
+        if (queryKey == null || label == null) {
+            return null;
+        }
+        String sql = asTrimmed(args.get("sql"));
+        List<String> columns = null;
+        if (args.get("columns") instanceof List<?> raw) {
+            List<String> cols = new ArrayList<>();
+            for (Object o : raw) {
+                String c = asTrimmed(o);
+                if (c != null) {
+                    cols.add(c);
+                }
+            }
+            columns = cols.isEmpty() ? null : cols;
+        }
+        return new DataRequest(queryKey, label, sql, columns);
+    }
+
+    /** null·공백은 null, 그 외 trim 한 문자열. */
+    private static String asTrimmed(Object o) {
+        if (o == null) {
+            return null;
+        }
+        String s = String.valueOf(o).trim();
+        return s.isEmpty() ? null : s;
+    }
+
+    /**
+     * request_data 툴의 LLM 노출 정의. 조회 툴과 달리 실행되지 않고 조달 요청으로
+     * 수집되며, done 페이로드의 dataRequests → FE 요청 카드로 렌더된다.
+     */
+    private static LlmToolSpec requestDataSpec() {
+        Map<String, Object> props = new LinkedHashMap<>();
+        props.put("queryKey", Map.of("type", "string", "description",
+                "이 데이터를 충족할 스냅샷의 안정 키(snake_case). 사용자가 붙여넣으면 이 키로 등록돼 "
+                        + "다음 요청에서 충족 여부를 판정한다."));
+        props.put("label", Map.of("type", "string", "description",
+                "사람이 읽는 설명 — 무슨 데이터가 왜 필요한지."));
+        props.put("sql", Map.of("type", "string", "description",
+                "사용자가 실행할 SQL(가능하면). 화면에 복사 버튼과 함께 표시된다."));
+        props.put("columns", Map.of(
+                "type", "array", "items", Map.of("type", "string"), "description",
+                "기대 컬럼(선택) — 사용자가 맞는 결과를 붙여넣었는지 가늠용."));
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("type", "object");
+        params.put("properties", props);
+        params.put("required", List.of("queryKey", "label"));
+        return new LlmToolSpec(REQUEST_DATA_TOOL,
+                "DB 에 직접 조회할 수 없어 필요한 데이터를 얻지 못할 때, 값을 지어내지 말고 이 툴로 "
+                        + "사용자에게 조달을 요청한다. 이미 [제공된 데이터]로 받은 것은 다시 요청하지 않는다.",
+                params);
     }
 
     /**

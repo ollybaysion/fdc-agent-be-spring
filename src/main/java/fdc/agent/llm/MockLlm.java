@@ -21,6 +21,7 @@ public class MockLlm implements LlmClient {
     private static final Pattern ID_RE = Pattern.compile("\\b([A-Z]{2,4}-\\d{2,})\\b");
     // 센서 ID 패턴 (예: S-0004). 도메인 스킬(snsr_id 파라미터) 호출용.
     private static final Pattern SENSOR_RE = Pattern.compile("\\bS-\\d{3,}\\b");
+    private static final String REQUEST_DATA_TOOL = "request_data";
 
     @Override
     public LlmTurn next(List<LlmMessage> messages, List<LlmToolSpec> tools) {
@@ -62,19 +63,66 @@ public class MockLlm implements LlmClient {
         }
 
         Matcher idMatch = ID_RE.matcher(text);
-        if (!idMatch.find()) {
+        if (idMatch.find()) {
+            String id = idMatch.group(1);
+            if (matches(text, "동종|피어|비슷|같은\\s*모델|peer") && has(tools, "get_peers")) {
+                return new LlmToolCall("call_1", "get_peers", Map.of("id", id));
+            }
+            if (matches(text, "셋업|set\\s*up|정비|이벤트|이력|maintenance") && has(tools, "get_setup_events")) {
+                return new LlmToolCall("call_1", "get_setup_events", Map.of("id", id));
+            }
+            if (has(tools, "get_equipment_detail")) {
+                return new LlmToolCall("call_1", "get_equipment_detail", Map.of("id", id));
+            }
             return null;
         }
-        String id = idMatch.group(1);
 
-        if (matches(text, "동종|피어|비슷|같은\\s*모델|peer") && has(tools, "get_peers")) {
-            return new LlmToolCall("call_1", "get_peers", Map.of("id", id));
+        // 설비/센서 ID 가 없는데 특정 데이터를 요구하면 — DB 없이 조달을 요청(request_data).
+        // 실 LLM 이라면 모델이 "무엇이 없는지" 판단할 자리를, mock 은 키워드로 흉내낸다.
+        // 주입된 [분석 대상]/[제공된 데이터] 블록은 빼고 원 질문만 본다 — 붙여넣은 라벨이
+        // 오발화하지 않게(억제는 에이전트가 queryKey 로 확정한다).
+        DataNeed need = matchDataNeed(beforeInjectedBlocks(text));
+        if (need != null && has(tools, REQUEST_DATA_TOOL)) {
+            return new LlmToolCall("call_1", REQUEST_DATA_TOOL, Map.of(
+                    "queryKey", need.queryKey(),
+                    "label", need.label(),
+                    "sql", need.sql(),
+                    "columns", need.columns()));
         }
-        if (matches(text, "셋업|set\\s*up|정비|이벤트|이력|maintenance") && has(tools, "get_setup_events")) {
-            return new LlmToolCall("call_1", "get_setup_events", Map.of("id", id));
-        }
-        if (has(tools, "get_equipment_detail")) {
-            return new LlmToolCall("call_1", "get_equipment_detail", Map.of("id", id));
+        return null;
+    }
+
+    /** 주입된 [분석 대상]/[제공된 데이터] 블록을 뗀 원 질문(키워드 오발화 방지). */
+    private static String beforeInjectedBlocks(String text) {
+        int idx = text.indexOf("\n\n[");
+        return idx >= 0 ? text.substring(0, idx) : text;
+    }
+
+    private record DataNeed(
+            String queryKey, String label, String sql, List<String> columns, List<String> triggers) {
+    }
+
+    // DB 없이 조달을 요청할 만한 데이터(FE mock 의 REQUESTABLE 대응).
+    private static final List<DataNeed> REQUESTABLE = List.of(
+            new DataNeed("sensor_list", "챔버별 센서 목록",
+                    "SELECT chamber, sensor_id, sensor_name\n  FROM fdc_sensor_master\n"
+                            + " WHERE equipment_id = :equipment_id\n ORDER BY chamber, sensor_id",
+                    List.of("CHAMBER", "SENSOR_ID", "SENSOR_NAME"),
+                    List.of("센서 목록")),
+            new DataNeed("recipe_steps", "레시피 STEP 구성",
+                    "SELECT recipe_id, step_no, step_name, duration_sec\n  FROM fdc_recipe_step\n"
+                            + " WHERE recipe_id = :recipe_id\n ORDER BY step_no",
+                    List.of("RECIPE_ID", "STEP_NO", "STEP_NAME", "DURATION_SEC"),
+                    List.of("레시피")));
+
+    private static DataNeed matchDataNeed(String question) {
+        String q = question.toLowerCase();
+        for (DataNeed n : REQUESTABLE) {
+            for (String t : n.triggers()) {
+                if (q.contains(t.toLowerCase())) {
+                    return n;
+                }
+            }
         }
         return null;
     }
