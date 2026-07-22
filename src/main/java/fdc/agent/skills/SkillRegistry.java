@@ -18,7 +18,8 @@ import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 /**
  * 스킬 레지스트리(Node 판 skills/registry.ts 대응) — classpath `skills/` 의
  * 모든 `<name>.spec.json` 을 자동 스캔해 에이전트 툴로 컴파일한다. 새 스킬
- * 추가 = 그 폴더에 spec.json + wiring.json 두 파일을 떨구면 끝(코드 편집 0).
+ * 추가 = 그 폴더에 spec.json 하나를 떨구면 끝(코드 편집 0) — 배선은
+ * spec 의 steps[].binds 가 소유한다(akg json-spec v0.6.0, wiring.json 소멸).
  *
  * SQL 조회 함수는 seam: oracle 모드는 실 Oracle(JdbcClient), fixture 모드는
  * 아래 seed(골든 spec 의 예시 데이터)로 동작해 사내 없이도 데모/검증 가능.
@@ -29,24 +30,16 @@ public final class SkillRegistry {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    private record LoadedSkill(SkillSpec spec, SkillWiring wiring) {
-    }
-
     // 모듈 로드 시 1회 스캔(파일명 정렬해 결정적 순서).
-    private static final List<LoadedSkill> LOADED = loadAllSkills();
+    private static final List<SkillSpec> LOADED = loadAllSkills();
 
-    private static List<LoadedSkill> loadAllSkills() {
+    private static List<SkillSpec> loadAllSkills() {
         try {
             Resource[] specs = new PathMatchingResourcePatternResolver()
                     .getResources("classpath:skills/*.spec.json");
             return Arrays.stream(specs)
                     .sorted(Comparator.comparing(Resource::getFilename))
-                    .map(specRes -> {
-                        String base = specRes.getFilename().replaceAll("\\.spec\\.json$", "");
-                        return new LoadedSkill(
-                                readJson(specRes, SkillSpec.class),
-                                readJson("skills/" + base + ".wiring.json", SkillWiring.class));
-                    })
+                    .map(specRes -> readJson(specRes, SkillSpec.class))
                     .toList();
         } catch (IOException e) {
             throw new UncheckedIOException("스킬 폴더 스캔 실패", e);
@@ -62,14 +55,10 @@ public final class SkillRegistry {
         }
     }
 
-    private static <T> T readJson(String classpath, Class<T> type) {
-        return readJson(new PathMatchingResourcePatternResolver().getResource("classpath:" + classpath), type);
-    }
-
     /** 도메인 스킬 툴 목록 — 폴더의 모든 spec 을 컴파일. */
     public static List<AgentTool> buildSkillTools(SkillQuery skillQuery) {
         return LOADED.stream()
-                .map(s -> SkillLoader.loadSkill(s.spec(), skillQuery, s.wiring()))
+                .map(spec -> SkillLoader.loadSkill(spec, skillQuery))
                 .toList();
     }
 

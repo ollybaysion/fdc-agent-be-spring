@@ -1,11 +1,13 @@
 package fdc.agent.skills;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * forge-domain-skill 의 spec.json (v2). spec 파일 자체가 언어 중립 진실원이고,
- * 형식의 표준은 agent-skill-foundry 의 {@code forge/render-skill.mjs}
- * ({@code validateSpec}) 이다.
+ * 형식의 표준은 agent-knowledge-governance(akg)의
+ * {@code schemas/domain-skill/v1.schema.json} + json-spec §4.4 다 — 포맷
+ * 진실원이 akg 로 이관 발효됐고 foundry 렌더러는 삭제됐다(asf #13).
  *
  * <p>v2 에서 {@code description} 은 spec 필드가 아니다 — {@code scope + focus +
  * inputs} 에서 <b>합성</b>된다({@link SkillLoader#synthesizeDescription}). 합성
@@ -53,8 +55,17 @@ public record SkillSpec(
             String produces,
             String lead,
             String sql,
+            Map<String, BindSource> binds,
             List<SkillBranch> branches,
             String notes) {
+    }
+
+    /**
+     * 한 bind 값의 출처(akg json-spec v0.6.0 {@code steps[].binds}) —
+     * from="arg"(툴 인자) 또는 from="step"(앞 스텝 결과 컬럼). wiring.json
+     * 사이드카를 spec 이 흡수한 자리라 스킬 하나 = 파일 하나다(akg #32).
+     */
+    public record BindSource(String from, String arg, Integer step, String column) {
     }
 
     public record SkillExample(String ask, String answer) {
