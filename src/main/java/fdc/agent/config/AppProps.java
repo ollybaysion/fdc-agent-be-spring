@@ -12,7 +12,8 @@ public record AppProps(
         @DefaultValue("development") String env,
         @DefaultValue("fixture") String dataSource,
         @DefaultValue Oracle oracle,
-        @DefaultValue Llm llm) {
+        @DefaultValue Llm llm,
+        @DefaultValue Akg akg) {
 
     public record Oracle(
             String user,
@@ -23,6 +24,14 @@ public record AppProps(
     }
 
     public record Llm(String baseUrl, String apiKey, String model) {
+    }
+
+    /**
+     * akg 지식 허브 연동(이슈 #8) — url 이 비어 있으면 연동이 꺼지고
+     * classpath 번들 스킬만 쓴다. refreshSeconds = 스킬 목록 재확인 주기
+     * (0 = 매 요청 확인, 테스트·디버그용).
+     */
+    public record Akg(String url, String token, @DefaultValue("300") int refreshSeconds) {
     }
 
     public boolean isProd() {

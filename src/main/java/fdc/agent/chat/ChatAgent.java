@@ -14,6 +14,7 @@ import fdc.agent.llm.LlmTypes.LlmToolSpec;
 import fdc.agent.llm.LlmTypes.LlmTurn;
 import fdc.agent.skills.SkillQuery;
 import fdc.agent.skills.SkillRegistry;
+import fdc.agent.skills.SkillSource;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -96,11 +97,18 @@ public class ChatAgent {
     private final LlmClient llm;
     private final EquipmentRepo repo;
     private final SkillQuery skillQuery;
+    private final SkillSource skillSource;
 
     public ChatAgent(LlmClient llm, EquipmentRepo repo, SkillQuery skillQuery) {
+        this(llm, repo, skillQuery, SkillRegistry::bundledSpecs);
+    }
+
+    /** skillSource = 스킬 spec 출처 seam — classpath 번들 또는 akg 허브(#8). */
+    public ChatAgent(LlmClient llm, EquipmentRepo repo, SkillQuery skillQuery, SkillSource skillSource) {
         this.llm = llm;
         this.repo = repo;
         this.skillQuery = skillQuery;
+        this.skillSource = skillSource;
     }
 
     public AgentResult run(List<HistoryMessage> history, FormContext formContext) {
@@ -128,7 +136,7 @@ public class ChatAgent {
         // + (붙여넣은 스냅샷이 있으면) query_snapshot 툴.
         List<AgentTool> tools = new ArrayList<>();
         tools.addAll(EquipmentTools.buildEquipmentTools(repo));
-        tools.addAll(SkillRegistry.buildSkillTools(skillQuery));
+        tools.addAll(SkillRegistry.compile(skillSource.specs(), skillQuery));
         if (snapshotDb != null) {
             tools.add(querySnapshotTool(snapshotDb));
         }

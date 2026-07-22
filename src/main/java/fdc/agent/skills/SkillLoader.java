@@ -59,8 +59,11 @@ public final class SkillLoader {
      * 앞 스텝만 · SQL {@code :var} 집합과 정확 일치). 실행기의 책임은 배선의
      * 저작이 아니라 나쁜 선언의 거부다: 어긋난 spec 은 런타임 침묵 스킵이
      * 아니라 기동 실패로 드러난다(이슈 #7 ②의 이름-매칭 사고 방지).
+     *
+     * <p>public 인 이유: {@link AkgSkillSource} 가 허브에서 받은 spec 을
+     * 수용 전에 같은 검증으로 거른다 — 나쁜 문서 하나가 챗을 못 죽이게.
      */
-    private static void validateBinds(SkillSpec spec) {
+    public static void validateBinds(SkillSpec spec) {
         Set<String> inputNames = new HashSet<>();
         for (SkillSpec.SkillInput p : spec.inputs()) {
             inputNames.add(p.name());
