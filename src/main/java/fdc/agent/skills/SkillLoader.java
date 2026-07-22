@@ -5,9 +5,13 @@ import fdc.agent.chat.AgentTool;
 import fdc.agent.chat.AgentTool.ToolResult;
 import fdc.agent.contract.ChatTable;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * skill-loader — forge-domain-skill 의 spec.json(v2) 을 에이전트 툴로 컴파일.
@@ -26,7 +30,8 @@ public final class SkillLoader {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    public static AgentTool loadSkill(SkillSpec spec, SkillQuery query, SkillWiring wiring) {
+    public static AgentTool loadSkill(SkillSpec spec, SkillQuery query) {
+        validateBinds(spec);
         String toolName = spec.name().replace("-", "_");
         Map<String, Object> properties = new LinkedHashMap<>();
         for (SkillSpec.SkillInput p : spec.inputs()) {
@@ -44,7 +49,61 @@ public final class SkillLoader {
                 toolName,
                 synthesizeDescription(spec),
                 parameters,
-                args -> runSkill(spec, query, wiring, args));
+                args -> runSkill(spec, query, args));
+    }
+
+    private static final Pattern BIND_VAR = Pattern.compile(":([A-Za-z][A-Za-z0-9_]*)");
+
+    /**
+     * 로드 시 배선 검증 — akg envelope.mjs 시맨틱 체크와 같은 3종(인자 실재 ·
+     * 앞 스텝만 · SQL {@code :var} 집합과 정확 일치). 실행기의 책임은 배선의
+     * 저작이 아니라 나쁜 선언의 거부다: 어긋난 spec 은 런타임 침묵 스킵이
+     * 아니라 기동 실패로 드러난다(이슈 #7 ②의 이름-매칭 사고 방지).
+     */
+    private static void validateBinds(SkillSpec spec) {
+        Set<String> inputNames = new HashSet<>();
+        for (SkillSpec.SkillInput p : spec.inputs()) {
+            inputNames.add(p.name());
+        }
+        for (int i = 0; i < spec.steps().size(); i++) {
+            SkillSpec.SkillStep step = spec.steps().get(i);
+            Map<String, SkillSpec.BindSource> binds = step.binds() != null ? step.binds() : Map.of();
+            Set<String> sqlVars = extractBindVars(step.sql());
+            for (Map.Entry<String, SkillSpec.BindSource> e : binds.entrySet()) {
+                SkillSpec.BindSource src = e.getValue();
+                String at = spec.name() + " steps[" + i + "].binds." + e.getKey();
+                if ("arg".equals(src.from())) {
+                    if (!inputNames.contains(src.arg())) {
+                        throw new IllegalStateException(at + ": no input named \"" + src.arg() + "\"");
+                    }
+                } else if ("step".equals(src.from())) {
+                    if (src.step() == null || src.step() < 0 || src.step() >= i) {
+                        throw new IllegalStateException(at + ": step " + src.step() + " is not an earlier step");
+                    }
+                } else {
+                    throw new IllegalStateException(at + ": unknown from \"" + src.from() + "\"");
+                }
+                if (!sqlVars.contains(e.getKey())) {
+                    throw new IllegalStateException(at + ": declared but sql has no :" + e.getKey());
+                }
+            }
+            for (String v : sqlVars) {
+                if (!binds.containsKey(v)) {
+                    throw new IllegalStateException(spec.name() + " steps[" + i + "]: sql uses :" + v
+                            + " but binds does not declare it");
+                }
+            }
+        }
+    }
+
+    /** SQL 의 {@code :bind} 변수 추출 — 따옴표 리터럴은 벗긴다(날짜 마스크 ':' 오탐 방지). */
+    private static Set<String> extractBindVars(String sql) {
+        Set<String> vars = new HashSet<>();
+        Matcher m = BIND_VAR.matcher(sql.replaceAll("'[^']*'", "''"));
+        while (m.find()) {
+            vars.add(m.group(1));
+        }
+        return vars;
     }
 
     /** 한국어 조사 일치 — foundry 렌더러와 같은 규칙(합성 결과가 갈리지 않도록). */
@@ -78,18 +137,17 @@ public final class SkillLoader {
                 + " 묻는 상황에서 호출한다 (" + when + ").";
     }
 
-    private static ToolResult runSkill(
-            SkillSpec spec, SkillQuery query, SkillWiring wiring, Map<String, Object> args) {
+    private static ToolResult runSkill(SkillSpec spec, SkillQuery query, Map<String, Object> args) {
         List<List<Map<String, Object>>> stepRows = new ArrayList<>();
 
         for (int i = 0; i < spec.steps().size(); i++) {
-            Map<String, SkillWiring.BindSource> bindSpec =
-                    wiring.binds() != null ? wiring.binds().getOrDefault(i, Map.of()) : Map.of();
+            SkillSpec.SkillStep step = spec.steps().get(i);
+            Map<String, SkillSpec.BindSource> bindSpec = step.binds() != null ? step.binds() : Map.of();
             Map<String, Object> binds = new LinkedHashMap<>();
             boolean missingBind = false;
 
-            for (Map.Entry<String, SkillWiring.BindSource> e : bindSpec.entrySet()) {
-                SkillWiring.BindSource src = e.getValue();
+            for (Map.Entry<String, SkillSpec.BindSource> e : bindSpec.entrySet()) {
+                SkillSpec.BindSource src = e.getValue();
                 if ("arg".equals(src.from())) {
                     // 인자 이름으로 조회 — 다중 인자 지원.
                     Object raw = args.get(src.arg());
@@ -118,7 +176,7 @@ public final class SkillLoader {
                 stepRows.add(List.of());
                 continue;
             }
-            stepRows.add(query.query(spec.steps().get(i).sql(), binds));
+            stepRows.add(query.query(step.sql(), binds));
         }
 
         return buildResult(spec, stepRows);
