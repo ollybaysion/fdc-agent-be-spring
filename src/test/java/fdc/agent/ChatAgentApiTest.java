@@ -91,28 +91,31 @@ class ChatAgentApiTest {
     }
 
     @Test
-    void 붙여넣은_데이터_스냅샷은_프롬프트에_주입돼_LLM_이_근거로_본다() throws Exception {
-        // 📌 pinned 스냅샷(rows 있음) + 카탈로그 항목(rows 없음)을 함께 보낸다.
-        // 설비/센서 ID 가 없는 일반 질문이라 mock LLM 은 툴을 안 부르고, 주입된
-        // 마지막 사용자 메시지를 그대로 되돌려준다 — 스냅샷이 프롬프트에 닿았는지 검증.
+    void 붙여넣은_스냅샷은_임시DB로_적재돼_query_snapshot으로_조회된다() throws Exception {
+        // 📌 pinned 스냅샷(rows 있음)은 임시 SQLite 로 적재된다(Design B). 설비/센서 ID 가
+        // 없는 "이 데이터" 질문이라 mock LLM 은 query_snapshot 을 호출하고, 그 결과 표가
+        // done 에 실린다 — 행은 프롬프트에 붓지 않고 조회로 가져온다.
         String body = """
                 {"messages":[{"role":"user","content":"이 데이터로 분석해줘"}],
                  "dataSnapshots":[
                    {"queryKey":"sensor_list","label":"챔버별 센서","capturedAt":"2026-07-22T00:00",
                     "columns":["CHAMBER","SENSOR"],"rowCount":2,
-                    "rows":[["챔버A","온도"],[null,"압력"]]},
-                   {"queryKey":"recipe","label":"레시피 STEP","capturedAt":"2026-07-22T00:00",
-                    "columns":["STEP_NO"],"rowCount":5}
+                    "rows":[["챔버A","온도"],[null,"압력"]]}
                  ]}
                 """;
         MockHttpServletResponse res = chatWithBody(body);
         assertThat(res.getStatus()).isEqualTo(200);
-        String text = SseTestSupport.tokenText(res.getContentAsString(StandardCharsets.UTF_8));
+        String out = res.getContentAsString(StandardCharsets.UTF_8);
 
-        // 📌 스냅샷: 라벨 + 실제 셀 값이 프롬프트(→ mock 응답)에 나타난다.
-        assertThat(text).contains("챔버별 센서").contains("온도").contains("압력");
-        // 카탈로그 항목: 내용 없이 존재만 알린다.
-        assertThat(text).contains("레시피 STEP").contains("내용 미첨부");
+        JsonNode done = SseTestSupport.donePayload(out);
+        assertThat(done).isNotNull();
+        assertThat(done.path("finishReason").asText()).isEqualTo("stop");
+        assertThat(done.path("tables").isArray()).isTrue();
+
+        // query_snapshot 결과 표에 적재된 셀 값이 담긴다(프롬프트가 아니라 조회 결과로).
+        List<String> sensors = new ArrayList<>();
+        done.path("tables").get(0).path("rows").forEach(r -> sensors.add(r.path("SENSOR").asText()));
+        assertThat(sensors).contains("온도", "압력");
     }
 
     @Test

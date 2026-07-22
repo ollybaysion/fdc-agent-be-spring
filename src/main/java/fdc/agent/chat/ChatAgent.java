@@ -35,11 +35,11 @@ public class ChatAgent {
 
     private static final int MAX_STEPS = 4;
 
-    /** 붙여넣은 스냅샷 한 건에서 프롬프트에 펴는 최대 행수(큰 표가 프롬프트를 삼키지 않게). */
-    private static final int MAX_SNAPSHOT_ROWS = 200;
-
     /** 조달 요청 툴 이름 — 실 조회 툴과 달리 실행하지 않고 요청으로 수집한다. */
     private static final String REQUEST_DATA_TOOL = "request_data";
+
+    /** 붙여넣은 스냅샷 임시 DB 를 SELECT 로 조회하는 툴 이름(Design B). */
+    private static final String QUERY_SNAPSHOT_TOOL = "query_snapshot";
 
     private static final String SYSTEM_PROMPT = String.join(" ",
             "당신은 반도체 설비 이상탐지(FDC) 분석 어시스턴트다.",
@@ -50,6 +50,8 @@ public class ChatAgent {
             "DB 에 직접 조회할 수 없어 필요한 데이터를 얻지 못하면, 값을 지어내지 말고 request_data 툴로",
             "사용자에게 조달을 요청하라 — 안정적인 snake_case queryKey 와, 가능하면 실행할 SQL 을 함께 준다.",
             "이미 [제공된 데이터]로 받은 것(같은 queryKey)은 다시 요청하지 않는다.",
+            "사용자가 붙여넣어 임시 DB(SQLite)로 적재된 표가 있으면, 값을 추측하지 말고 query_snapshot 툴에",
+            "SELECT 문을 주어 조회한 결과를 근거로 삼는다(사용 가능한 테이블·컬럼은 [제공된 데이터]에 있다).",
             // FE(MessageBubble)는 답변을 Markdown(GFM)으로 렌더한다 — 서식을 명시하지
             // 않으면 굵게/목록 등이 깨진다. raw HTML 은 sanitize 로 제거되므로 쓰지 않는다.
             "답변은 한국어로 간결하게 작성하고, 서식은 Markdown(GFM)으로 한다 —",
@@ -107,10 +109,29 @@ public class ChatAgent {
 
     public AgentResult run(
             List<HistoryMessage> history, FormContext formContext, List<ChatDataSnapshot> dataSnapshots) {
-        // 설비 조회 툴 + 도메인 스킬 툴(explain-sensor / trace-reading 등 자동 로드).
+        // 붙여넣은 스냅샷(행 있음) → 요청 단위 인메모리 SQLite(Design B). 없으면 null.
+        // 요청이 끝나면 연결을 닫는다(finally) — 여러 반환점을 감싸려 루프를 분리한다.
+        SnapshotDb snapshotDb = SnapshotDb.build(dataSnapshots);
+        try {
+            return runLoop(history, formContext, dataSnapshots, snapshotDb);
+        } finally {
+            if (snapshotDb != null) {
+                snapshotDb.close();
+            }
+        }
+    }
+
+    private AgentResult runLoop(
+            List<HistoryMessage> history, FormContext formContext,
+            List<ChatDataSnapshot> dataSnapshots, SnapshotDb snapshotDb) {
+        // 설비 조회 툴 + 도메인 스킬 툴(explain-sensor / trace-reading 등 자동 로드)
+        // + (붙여넣은 스냅샷이 있으면) query_snapshot 툴.
         List<AgentTool> tools = new ArrayList<>();
         tools.addAll(EquipmentTools.buildEquipmentTools(repo));
         tools.addAll(SkillRegistry.buildSkillTools(skillQuery));
+        if (snapshotDb != null) {
+            tools.add(querySnapshotTool(snapshotDb));
+        }
         Map<String, AgentTool> toolByName = new LinkedHashMap<>();
         tools.forEach(t -> toolByName.put(t.name(), t));
         List<LlmToolSpec> specs = new ArrayList<>(tools.stream()
@@ -141,7 +162,8 @@ public class ChatAgent {
         // 폼 컨텍스트 + 사용자가 붙여넣은 데이터 스냅샷을 별도 system 메시지가 아니라
         // 마지막 사용자 메시지에 덧붙인다 — 약한 모델도 요청의 일부로 확실히 반영
         // (값이 다 있으면 바로 분석, 붙여넣은 데이터가 있으면 그걸 근거로).
-        String note = joinNotes(formatFormContext(formContext), formatDataSnapshots(dataSnapshots));
+        String note = joinNotes(
+                formatFormContext(formContext), formatDataSnapshots(dataSnapshots, snapshotDb));
         if (note != null) {
             int lastUser = -1;
             for (int i = hist.size() - 1; i >= 0; i--) {
@@ -388,42 +410,81 @@ public class ChatAgent {
      * 사용자가 데이터 패널에서 붙여넣어 요청에 실은 스냅샷을 LLM 이 읽을 한 블록으로.
      * 아무것도 없으면 null(주입 안 함).
      *
-     * <p>📌(rows 있음)은 전문을 표로 펴서 주입해 LLM 이 값을 직접 근거로 삼게 하고,
-     * 카탈로그 항목(rows 없음)은 "이런 표가 있다"만 알린다 — 내용이 아직 안 왔으므로
-     * 지어내지 말고 필요하면 사용자에게 요청하라는 신호다. 큰 표는 행수를 캡한다.
+     * <p>Design B: 행 있는(📌) 스냅샷은 {@link SnapshotDb}(임시 SQLite)로 적재되므로
+     * 여기엔 <b>스키마만</b> 편다 — 행은 프롬프트에 붓지 않고 query_snapshot 툴로 조회하게
+     * 한다(토큰 절약·대용량 정밀 조회). 카탈로그 항목(rows 없음)은 "이런 표가 있다"만
+     * 알린다 — 내용이 아직 안 왔으니 지어내지 말고 필요하면 사용자에게 요청하라는 신호다.
      */
-    static String formatDataSnapshots(List<ChatDataSnapshot> snapshots) {
+    static String formatDataSnapshots(List<ChatDataSnapshot> snapshots, SnapshotDb snapshotDb) {
         if (snapshots == null || snapshots.isEmpty()) {
             return null;
         }
         List<String> parts = new ArrayList<>();
         parts.add("[제공된 데이터 — 사용자 첨부]");
-        parts.add("아래는 사용자가 직접 조회해 붙여넣은 데이터다. 이 값을 근거로 답하고, "
-                + "여기 없는 값은 지어내지 않는다.");
+        // 행 있는 스냅샷: 조회용 임시 DB로 적재됨 — 스키마만 주입하고 query_snapshot 으로 조회.
+        if (snapshotDb != null && !snapshotDb.isEmpty()) {
+            parts.add("아래 표는 조회용 임시 DB(SQLite)로 적재되어 있다. 값이 필요하면 "
+                    + "query_snapshot 툴에 SELECT 문을 주어 조회하라(행 데이터는 여기 없다).");
+            parts.add(snapshotDb.schemaCatalog());
+        }
+        // 행 없는 카탈로그 항목: "이런 표가 있다"만 알린다(내용은 아직 안 옴).
+        List<String> catalogOnly = new ArrayList<>();
         for (ChatDataSnapshot s : snapshots) {
-            String label = s.label() != null && !s.label().isBlank() ? s.label() : s.queryKey();
-            List<String> cols = s.columns() != null ? s.columns() : List.of();
-            List<List<String>> rows = s.rows();
-            int rowCount = s.rowCount() != null ? s.rowCount() : (rows != null ? rows.size() : 0);
-            String head = "- " + label + " (" + String.join(", ", cols) + "), " + rowCount + "행";
-            if (rows == null || rows.isEmpty()) {
-                parts.add(head + " — 내용 미첨부(필요하면 사용자에게 요청).");
+            if (s == null || (s.rows() != null && !s.rows().isEmpty())) {
                 continue;
             }
-            parts.add(head + ":");
-            parts.add("  " + String.join(" | ", cols));
-            int shown = Math.min(rows.size(), MAX_SNAPSHOT_ROWS);
-            for (int i = 0; i < shown; i++) {
-                List<String> cells = new ArrayList<>();
-                for (String c : rows.get(i)) {
-                    cells.add(c == null ? "" : c);
-                }
-                parts.add("  " + String.join(" | ", cells));
-            }
-            if (rows.size() > shown) {
-                parts.add("  … (" + rows.size() + "행 중 처음 " + shown + "행만 표시)");
-            }
+            String label = s.label() != null && !s.label().isBlank() ? s.label() : s.queryKey();
+            List<String> cols = s.columns() != null ? s.columns() : List.of();
+            catalogOnly.add("- " + label + " (" + String.join(", ", cols)
+                    + ") — 내용 미첨부(필요하면 사용자에게 요청).");
         }
-        return String.join("\n", parts);
+        if (!catalogOnly.isEmpty()) {
+            parts.add("아직 내용이 안 온 항목:");
+            parts.addAll(catalogOnly);
+        }
+        // 헤더만 남았으면(담을 표도 카탈로그도 없음) 주입하지 않는다.
+        return parts.size() > 1 ? String.join("\n", parts) : null;
+    }
+
+    /**
+     * query_snapshot 툴 — 붙여넣어 임시 DB(SQLite)로 적재된 표를 SELECT 로 조회한다.
+     * 실행 결과 표는 done 페이로드에 실리고, 요약이 LLM 에 되먹인다(일반 조회 툴과 동일
+     * 경로). SELECT-only — 변경 문은 {@link SnapshotDb} 가 거부한다.
+     */
+    private static AgentTool querySnapshotTool(SnapshotDb snapshotDb) {
+        Map<String, Object> props = new LinkedHashMap<>();
+        props.put("sql", Map.of("type", "string", "description",
+                "실행할 SELECT 문. 사용 가능한 테이블·컬럼은 [제공된 데이터]에 있다. "
+                        + "SELECT/WITH 로 시작하는 단일 문장만 허용된다."));
+        props.put("title", Map.of("type", "string", "description",
+                "결과 표에 붙일 제목(선택)."));
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("type", "object");
+        params.put("properties", props);
+        params.put("required", List.of("sql"));
+        return new AgentTool(QUERY_SNAPSHOT_TOOL,
+                "사용자가 붙여넣어 임시 DB(SQLite)로 적재된 표를 SELECT 로 조회한다. 값을 지어내지 말고 "
+                        + "이 툴로 확인하라. INSERT/UPDATE/DROP 등 변경은 불가(SELECT 만).",
+                params,
+                args -> runSnapshotQuery(snapshotDb, args));
+    }
+
+    /** query_snapshot 실행 — SELECT 결과 표 + 요약. 가드 위반·SQL 오류는 사유를 되먹인다. */
+    private static ToolResult runSnapshotQuery(SnapshotDb snapshotDb, Map<String, Object> args) {
+        String sql = args != null ? asTrimmed(args.get("sql")) : null;
+        String title = args != null ? asTrimmed(args.get("title")) : null;
+        if (sql == null) {
+            return ToolResult.of("sql 인자가 필요합니다(조회할 SELECT 문).");
+        }
+        try {
+            ChatTable table = snapshotDb.query(sql, title);
+            String cols = table.columns() != null ? String.join(", ", table.columns()) : "";
+            return new ToolResult(
+                    "query_snapshot: " + table.rows().size() + "행 조회됨 (컬럼: " + cols + ").",
+                    List.of(table));
+        } catch (IllegalArgumentException e) {
+            return ToolResult.of("조회할 수 없습니다: " + e.getMessage()
+                    + " SELECT 문만 허용되며, 사용 가능한 테이블·컬럼은 [제공된 데이터]에 있습니다.");
+        }
     }
 }
