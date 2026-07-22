@@ -22,6 +22,12 @@ public class MockLlm implements LlmClient {
     // 센서 ID 패턴 (예: S-0004). 도메인 스킬(snsr_id 파라미터) 호출용.
     private static final Pattern SENSOR_RE = Pattern.compile("\\bS-\\d{3,}\\b");
     private static final String REQUEST_DATA_TOOL = "request_data";
+    private static final String QUERY_SNAPSHOT_TOOL = "query_snapshot";
+    // 붙여넣은 데이터를 조회하겠다는 원 질문의 신호(주입 블록은 제외하고 본다).
+    private static final Pattern WANTS_SNAPSHOT_QUERY =
+            Pattern.compile("이\\s*데이터|붙여넣|첨부|조회|스냅샷", Pattern.CASE_INSENSITIVE);
+    // 스키마 카탈로그의 백틱 테이블명(예: `sensor_list`)에서 조회 대상 테이블을 뽑는다.
+    private static final Pattern SNAPSHOT_TABLE = Pattern.compile("`([A-Za-z0-9_]+)`");
 
     @Override
     public LlmTurn next(List<LlmMessage> messages, List<LlmToolSpec> tools) {
@@ -75,6 +81,19 @@ public class MockLlm implements LlmClient {
                 return new LlmToolCall("call_1", "get_equipment_detail", Map.of("id", id));
             }
             return null;
+        }
+
+        // 붙여넣어 임시 DB로 적재된 표가 있고 원 질문이 조회를 요청하면 — query_snapshot.
+        // (억제와 마찬가지로 주입 블록은 빼고 원 질문만 본다.) 스키마 카탈로그의 첫
+        // 백틱 테이블명을 골라 SELECT * 로 조회한다 — 실 LLM 이 SQL 을 짜는 자리를 흉내.
+        if (has(tools, QUERY_SNAPSHOT_TOOL)
+                && WANTS_SNAPSHOT_QUERY.matcher(beforeInjectedBlocks(text)).find()) {
+            Matcher tableMatch = SNAPSHOT_TABLE.matcher(text);
+            if (tableMatch.find()) {
+                return new LlmToolCall("call_1", QUERY_SNAPSHOT_TOOL, Map.of(
+                        "sql", "SELECT * FROM \"" + tableMatch.group(1) + "\"",
+                        "title", "조회 결과"));
+            }
         }
 
         // 설비/센서 ID 가 없는데 특정 데이터를 요구하면 — DB 없이 조달을 요청(request_data).
