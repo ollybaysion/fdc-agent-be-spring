@@ -30,3 +30,9 @@ fdc:
     base-url: ${LLM_BASE_URL:}
     api-key: ${LLM_API_KEY:}
     model: ${LLM_MODEL:}
+  # akg 지식 허브(#8) — URL(+필요시 토큰)만 넣으면 도메인 스킬을 허브에서
+  # 런타임 fetch 한다. 비어 있으면 classpath 번들 스킬만 사용(기존 동작).
+  akg:
+    url: ${AKG_URL:}
+    token: ${AKG_TOKEN:}
+    refresh-seconds: ${AKG_REFRESH_SECONDS:300}

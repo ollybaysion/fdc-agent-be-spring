@@ -55,11 +55,21 @@ public final class SkillRegistry {
         }
     }
 
-    /** 도메인 스킬 툴 목록 — 폴더의 모든 spec 을 컴파일. */
-    public static List<AgentTool> buildSkillTools(SkillQuery skillQuery) {
-        return LOADED.stream()
+    /** classpath 번들 spec — akg 미설정·불가침 시의 폴백 세트. */
+    public static List<SkillSpec> bundledSpecs() {
+        return LOADED;
+    }
+
+    /** spec 목록 → 에이전트 툴 컴파일(출처 무관 — 번들이든 akg 허브든). */
+    public static List<AgentTool> compile(List<SkillSpec> specs, SkillQuery skillQuery) {
+        return specs.stream()
                 .map(spec -> SkillLoader.loadSkill(spec, skillQuery))
                 .toList();
+    }
+
+    /** 도메인 스킬 툴 목록 — 번들의 모든 spec 을 컴파일. */
+    public static List<AgentTool> buildSkillTools(SkillQuery skillQuery) {
+        return compile(LOADED, skillQuery);
     }
 
     // ── fixture 모드 seed (골든 spec 의 예시: S-0004 = CVD-01 FLOW, 비활성) ──

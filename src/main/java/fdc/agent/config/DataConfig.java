@@ -7,8 +7,10 @@ import fdc.agent.data.oracle.OracleEquipmentRepo;
 import fdc.agent.llm.LlmTypes.LlmClient;
 import fdc.agent.llm.MockLlm;
 import fdc.agent.llm.OpenAiLlm;
+import fdc.agent.skills.AkgSkillSource;
 import fdc.agent.skills.SkillQuery;
 import fdc.agent.skills.SkillRegistry;
+import fdc.agent.skills.SkillSource;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -44,8 +46,22 @@ public class DataConfig {
                 : new MockLlm();
     }
 
+    /**
+     * 스킬 출처 seam — AKG_URL 설정 시 지식 허브에서 런타임 fetch(#8),
+     * 미설정 시 classpath 번들(기존 동작 그대로).
+     */
     @Bean
-    public ChatAgent chatAgent(LlmClient llm, EquipmentRepo repo, SkillQuery skillQuery) {
-        return new ChatAgent(llm, repo, skillQuery);
+    public SkillSource skillSource(AppProps props) {
+        AppProps.Akg akg = props.akg();
+        boolean hubOn = akg != null && akg.url() != null && !akg.url().isEmpty();
+        return hubOn
+                ? new AkgSkillSource(akg.url(), akg.token(), akg.refreshSeconds())
+                : SkillRegistry::bundledSpecs;
+    }
+
+    @Bean
+    public ChatAgent chatAgent(
+            LlmClient llm, EquipmentRepo repo, SkillQuery skillQuery, SkillSource skillSource) {
+        return new ChatAgent(llm, repo, skillQuery, skillSource);
     }
 }
