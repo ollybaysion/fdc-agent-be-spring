@@ -249,7 +249,8 @@ public class ChatAgent {
         }
         out.add(req);
         return "데이터 요청을 등록했습니다: " + req.label()
-                + ". 사용자가 결과를 붙여넣으면 이어서 분석합니다. 없는 값은 지어내지 않습니다.";
+                + ". 데이터 패널 카드의 SQL 을 실행해 결과를 붙여넣어 등록하고, 채팅에 \"등록 완료\"라고"
+                + " 알려주시면 그 데이터로 이어서 분석합니다. 없는 값은 지어내지 않습니다.";
     }
 
     /** request_data 인자(느슨하게 수용)를 DataRequest 로. queryKey·label 없으면 null. */

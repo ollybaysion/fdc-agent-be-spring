@@ -24,8 +24,9 @@ public class MockLlm implements LlmClient {
     private static final String REQUEST_DATA_TOOL = "request_data";
     private static final String QUERY_SNAPSHOT_TOOL = "query_snapshot";
     // 붙여넣은 데이터를 조회하겠다는 원 질문의 신호(주입 블록은 제외하고 본다).
+    // "등록 완료"는 요청 카드를 채운 뒤의 이어가기 발화 — 적재된 표를 조회해 근거로 답한다.
     private static final Pattern WANTS_SNAPSHOT_QUERY =
-            Pattern.compile("이\\s*데이터|붙여넣|첨부|조회|스냅샷", Pattern.CASE_INSENSITIVE);
+            Pattern.compile("이\\s*데이터|붙여넣|첨부|조회|스냅샷|등록\\s*완료|등록했", Pattern.CASE_INSENSITIVE);
     // 스키마 카탈로그의 백틱 테이블명(예: `sensor_list`)에서 조회 대상 테이블을 뽑는다.
     private static final Pattern SNAPSHOT_TABLE = Pattern.compile("`([A-Za-z0-9_]+)`");
 
@@ -36,6 +37,12 @@ public class MockLlm implements LlmClient {
             return new LlmTurn.Final(last.content() != null ? last.content() : "");
         }
         String userText = lastUserText(messages);
+        // 후속 질문 프롬프트(ChatAgent.suggestFollowups)에는 결정적 추천을 돌려준다.
+        // 이 분기가 없으면 genericAnswer 가 프롬프트를 그대로 인용해, 프롬프트 속
+        // 예시 ["...", "...", "..."] 가 추천으로 파싱되는 사고가 난다.
+        if (userText.contains("후속 질문 3개")) {
+            return new LlmTurn.Final(followupSuggestions(messages));
+        }
         LlmToolCall call = planCall(userText, tools);
         if (call != null) {
             return new LlmTurn.ToolCalls(List.of(call));
@@ -158,6 +165,24 @@ public class MockLlm implements LlmClient {
     private static boolean requiresParam(LlmToolSpec tool, String param) {
         return tool.parameters().get("required") instanceof List<?> required
                 && required.contains(param);
+    }
+
+    /**
+     * 원 질문(이 3-메시지 맥락의 첫 user)의 키워드로 다음 걸음을 고른다 —
+     * 데이터 요청 왕복(sensor_list ↔ recipe_steps)이 추천 클릭만으로 이어지고,
+     * 나머지는 설비 ID 조회 계열로 빠져나가게.
+     */
+    private static String followupSuggestions(List<LlmMessage> messages) {
+        String original = messages.isEmpty() || messages.get(0).content() == null
+                ? ""
+                : messages.get(0).content();
+        if (original.contains("센서 목록")) {
+            return "[\"레시피 STEP 구성 알려줘\", \"ETCH-01 상세 정보 보여줘\", \"ETCH-01 동종 설비 알려줘\"]";
+        }
+        if (original.contains("레시피")) {
+            return "[\"챔버별 센서 목록 보여줘\", \"ETCH-01 상세 정보 보여줘\", \"ETCH-01 셋업 이력 알려줘\"]";
+        }
+        return "[\"챔버별 센서 목록 보여줘\", \"레시피 STEP 구성 알려줘\", \"ETCH-01 상세 정보 보여줘\"]";
     }
 
     private static String genericAnswer(String text) {
