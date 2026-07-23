@@ -43,10 +43,15 @@ public class MockLlm implements LlmClient {
         if (userText.contains("후속 질문 3개")) {
             return new LlmTurn.Final(followupSuggestions(messages));
         }
-        LlmToolCall call = planCall(userText, tools);
+        // 에이전트가 질문 앞에 끼운 섹션([분석 대상]/[제공된 데이터] — 별도 system
+        // 메시지)을 질문 뒤에 도로 이어붙여 키워드를 본다 — 덧붙이던 시절과 매칭
+        // 의미를 동일하게 유지(폼 블록에서 설비 ID 를 줍는 것 포함). 원 질문만
+        // 봐야 하는 트리거는 beforeInjectedBlocks 가 여전히 걸러낸다.
+        LlmToolCall call = planCall(withSection(userText, injectedSection(messages)), tools);
         if (call != null) {
             return new LlmTurn.ToolCalls(List.of(call));
         }
+        // 일반 안내의 질문 인용은 원 질문만 — 섹션까지 되읽어주면 소음이다.
         return new LlmTurn.Final(genericAnswer(userText));
     }
 
@@ -58,6 +63,21 @@ public class MockLlm implements LlmClient {
             }
         }
         return "";
+    }
+
+    /** 에이전트가 끼운 섹션 메시지(첫 system 프롬프트 제외) — 없으면 빈 문자열. */
+    private static String injectedSection(List<LlmMessage> messages) {
+        for (int i = messages.size() - 1; i > 0; i--) {
+            LlmMessage m = messages.get(i);
+            if ("system".equals(m.role())) {
+                return m.content() != null ? m.content() : "";
+            }
+        }
+        return "";
+    }
+
+    private static String withSection(String question, String section) {
+        return section.isEmpty() ? question : question + "\n\n" + section;
     }
 
     /** 키워드 기반 툴 선택. 설비 ID 가 없으면 툴 호출 안 함(일반 안내). */
