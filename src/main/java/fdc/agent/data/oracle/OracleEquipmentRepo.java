@@ -17,7 +17,7 @@ import java.util.stream.IntStream;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * Oracle 기반 EquipmentRepo(Node 판 oracle/equipmentRepo.ts 대응). SQL 은
+ * Oracle 기반 EquipmentRepo. SQL 은
  * SchemaMap 의 식별자로 조립하고, 값은 항상 bind 변수(:id 등)로 넘긴다.
  *
  * detail / peers / setup-events 는 완성형(사내엔 SchemaMap 이름만 채우면 됨).

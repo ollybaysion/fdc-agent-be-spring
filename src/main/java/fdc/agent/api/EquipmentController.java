@@ -1,4 +1,4 @@
-package fdc.agent.web;
+package fdc.agent.api;
 
 import fdc.agent.contract.Compare;
 import fdc.agent.contract.EquipmentDetail;
@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 정형 4개 GET(Node 판 routes/equipment.ts 대응). demo-fe 의 mock route 와
+ * 정형 4개 GET. demo-fe 의 mock route 와
  * 동일한 경로/에러코드/status 를 그대로 미러링하여, BACKEND_URL forward 시
  * 프론트가 차이를 못 느끼게 한다.
  */

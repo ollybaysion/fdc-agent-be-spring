@@ -4,7 +4,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 온프렘 LLM 추상화(seam, Node 판 llm/types.ts 대응). mock ↔ openai 를
+ * 온프렘 LLM 추상화(seam). mock ↔ openai 를
  * 갈아끼우고 에이전트 루프는 이 인터페이스만 안다. 스트리밍은 라우트가
  * 최종 텍스트를 문자 단위로 쪼개 흉내낸다 — 클라이언트는 "한 턴"을 완결해
  * 돌려주면 되므로 단순·견고.

@@ -16,7 +16,7 @@ import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 
 /**
- * 스킬 레지스트리(Node 판 skills/registry.ts 대응) — classpath `skills/` 의
+ * 스킬 레지스트리 — classpath `skills/` 의
  * 모든 `<name>.spec.json` 을 자동 스캔해 에이전트 툴로 컴파일한다. 새 스킬
  * 추가 = 그 폴더에 spec.json 하나를 떨구면 끝(코드 편집 0) — 배선은
  * spec 의 steps[].binds 가 소유한다(akg json-spec v0.6.0, wiring.json 소멸).

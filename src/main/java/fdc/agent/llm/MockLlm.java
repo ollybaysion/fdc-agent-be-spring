@@ -11,7 +11,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 결정적 mock LLM (LLM_BASE_URL 미설정 시, Node 판 llm/mock.ts 대응). 온프렘
+ * 결정적 mock LLM (LLM_BASE_URL 미설정 시). 온프렘
  * LLM 없이도 에이전트 루프·툴 호출·SSE 를 end-to-end 로 검증하기 위한 것.
  * 키워드로 툴 호출을 판단하고, 툴 결과가 오면 그 요약을 최종 답으로 돌려준다.
  */
@@ -128,7 +128,7 @@ public class MockLlm implements LlmClient {
             String queryKey, String label, String sql, List<String> columns, List<String> triggers) {
     }
 
-    // DB 없이 조달을 요청할 만한 데이터(FE mock 의 REQUESTABLE 대응).
+    // DB 없이 조달을 요청할 만한 데이터.
     private static final List<DataNeed> REQUESTABLE = List.of(
             new DataNeed("sensor_list", "챔버별 센서 목록",
                     "SELECT chamber, sensor_id, sensor_name\n  FROM fdc_sensor_master\n"

@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
- * 통일된 에러 형식(API.md §에러 형식, Node 판 app.ts setErrorHandler 대응).
+ * 통일된 에러 형식(API.md §에러 형식).
  * production 에서는 5xx 내부 상세를 비노출하고 로그에만 남긴다.
  */
 @RestControllerAdvice

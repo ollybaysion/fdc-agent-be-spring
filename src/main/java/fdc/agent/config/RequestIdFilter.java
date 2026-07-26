@@ -11,9 +11,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
- * 모든 응답(2xx/4xx/5xx)에 X-Request-Id + X-Fdc-Data-Source 를 싣는다
- * (Node 판 app.ts onSend 훅 대응). 클라이언트가 X-Request-Id 를 주면 그대로
- * 쓰고, 없으면 생성. MDC 로 로그에도 전파.
+ * 모든 응답(2xx/4xx/5xx)에 X-Request-Id + X-Fdc-Data-Source 를 싣는다.
+ * 클라이언트가 X-Request-Id 를 주면 그대로 쓰고, 없으면 생성. MDC 로 로그에도
+ * 전파.
  */
 @Component
 public class RequestIdFilter extends OncePerRequestFilter {

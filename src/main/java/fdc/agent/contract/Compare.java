@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 1:1 비교 계약(@fdc/contract equipment.ts CompareResponse 대응).
+ * 1:1 비교 계약.
  * 숫자 값은 Number 로 두어 JS 의 수 표기(정수는 소수점 없이)를 유지한다.
  */
 public final class Compare {

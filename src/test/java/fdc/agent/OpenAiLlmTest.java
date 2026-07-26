@@ -26,9 +26,9 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 /**
- * Node 판 test/openai-llm.test.ts 포팅 — 온프렘 OpenAI 호환 GW 연결 경로를
- * 사내 이전 전에 검증. 가짜 서버로 (a) OpenAI 형식 요청, (b) tool_calls /
- * 최종 content 파싱, (c) 에이전트 루프 e2e(fixture 데이터)를 확인한다.
+ * 온프렘 OpenAI 호환 GW 연결 경로를 사내 이전 전에 검증. 가짜 서버로 (a)
+ * OpenAI 형식 요청, (b) tool_calls / 최종 content 파싱, (c) 에이전트 루프
+ * e2e(fixture 데이터)를 확인한다.
  */
 class OpenAiLlmTest {
 

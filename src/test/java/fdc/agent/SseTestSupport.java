@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** SSE 본문 파싱 헬퍼(Node 판 테스트의 tokenText/donePayload 대응). */
+/** SSE 본문 파싱 헬퍼(tokenText/donePayload). */
 public final class SseTestSupport {
     private SseTestSupport() {
     }

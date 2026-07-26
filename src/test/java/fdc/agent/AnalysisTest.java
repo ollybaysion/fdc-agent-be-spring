@@ -17,10 +17,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
-/**
- * Node 판 test/analysis.test.ts 포팅 — 폼 컨텍스트 주입(PARAM_INDEX)과
- * fdc_trace_reading 호출 경로.
- */
+/** 폼 컨텍스트 주입(PARAM_INDEX)과 fdc_trace_reading 호출 경로. */
 class AnalysisTest {
 
     /** 받은 messages 를 포착하고, 지정 turn 을 순서대로 반환하는 가짜 LLM. */

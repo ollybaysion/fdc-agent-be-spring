@@ -20,8 +20,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * OpenAI 호환 온프렘 GW 어댑터 (LLM_BASE_URL 설정 시, Node 판 llm/openai.ts
- * 대응). 사내는 LLM_BASE_URL/KEY/MODEL 만 채우면 된다. non-stream 으로 한 턴을
+ * OpenAI 호환 온프렘 GW 어댑터 (LLM_BASE_URL 설정 시). 사내는
+ * LLM_BASE_URL/KEY/MODEL 만 채우면 된다. non-stream 으로 한 턴을
  * 받고, 라우트가 토큰 스트리밍을 흉내낸다(단순·견고).
  */
 public class OpenAiLlm implements LlmClient {

@@ -25,7 +25,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 채팅 에이전트 루프(Node 판 chat/agent.ts 대응). LLM 이 툴을 부르면 repo 로
+ * 채팅 에이전트 루프. LLM 이 툴을 부르면 repo 로
  * 실행해 결과를 되먹이고, 최종 답이 나오면 텍스트 + 수집한 표를 돌려준다.
  * LLM(mock/openai)·데이터(fixture/oracle)는 seam 뒤라 이 루프는 무지.
  *

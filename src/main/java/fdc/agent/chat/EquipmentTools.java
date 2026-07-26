@@ -11,7 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** 설비 조회 손툴 3종(Node 판 chat/tools.ts buildEquipmentTools 대응). */
+/** 설비 조회 손툴 3종. */
 public final class EquipmentTools {
     private EquipmentTools() {
     }

@@ -1,4 +1,4 @@
-package fdc.agent.web;
+package fdc.agent.api;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import fdc.agent.chat.ChatAgent;
@@ -23,8 +23,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * POST /api/fdc/v1/chat — SSE 스트림 (token* → done | error). Node 판
- * routes/chat.ts 대응: 에이전트 실행(툴 조회 포함)은 스트리밍 시작 전에 완료
+ * POST /api/fdc/v1/chat — SSE 스트림 (token* → done | error). 에이전트
+ * 실행(툴 조회 포함)은 스트리밍 시작 전에 완료
  * — 실패하면 아직 헤더를 안 보냈으므로 정상 HTTP 상태로 에러를 낼 수 있다.
  * 성공하면 최종 텍스트를 문자 단위로 흘려보내고, 표 등 구조화 데이터는
  * done 페이로드에 번들한다(FE mock 라우트와 동일 계약).
@@ -121,7 +121,7 @@ public class ChatController {
 
         ServletOutputStream out = res.getOutputStream();
         try {
-            // JS 판과 동일하게 code point 단위로 흘린다([...text] 대응).
+            // code point 단위로 흘린다 (서로게이트 쌍 유지).
             int[] codePoints = result.text().codePoints().toArray();
             for (int cp : codePoints) {
                 String ch = new String(Character.toChars(cp));

@@ -21,7 +21,7 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
-/** Node 판 test/skill-loader.test.ts 포팅 — spec.json → 에이전트 툴(하이브리드 C). */
+/** spec.json → 에이전트 툴(하이브리드 C). */
 class SkillLoaderTest {
 
     private static final ObjectMapper JSON = new ObjectMapper();
