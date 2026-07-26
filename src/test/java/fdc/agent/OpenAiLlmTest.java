@@ -8,6 +8,7 @@ import com.sun.net.httpserver.HttpServer;
 import fdc.agent.chat.ChatAgent;
 import fdc.agent.chat.ChatAgent.AgentResult;
 import fdc.agent.chat.ChatAgent.HistoryMessage;
+import fdc.agent.contract.FinishReason;
 import fdc.agent.data.fixtures.FixtureRepo;
 import fdc.agent.llm.LlmTypes.LlmMessage;
 import fdc.agent.llm.LlmTypes.LlmToolCall;
@@ -143,7 +144,7 @@ class OpenAiLlmTest {
         AgentResult result = agent.run(
                 List.of(new HistoryMessage("user", "ETCH-01 설비 정보 보여줘")), null);
 
-        assertThat(result.finishReason()).isEqualTo("stop");
+        assertThat(result.finishReason()).isEqualTo(FinishReason.STOP);
         assertThat(result.text()).contains("ETCH-01");
 
         List<String> titles = result.tables().stream().map(t -> t.title()).toList();

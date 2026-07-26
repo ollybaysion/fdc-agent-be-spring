@@ -6,6 +6,7 @@ import fdc.agent.chat.AgentTool.ToolResult;
 import fdc.agent.contract.ChatDataSnapshot;
 import fdc.agent.contract.ChatTable;
 import fdc.agent.contract.DataRequest;
+import fdc.agent.contract.FinishReason;
 import fdc.agent.data.EquipmentRepo;
 import fdc.agent.llm.LlmTypes.LlmClient;
 import fdc.agent.llm.LlmTypes.LlmMessage;
@@ -90,7 +91,7 @@ public class ChatAgent {
      * dataRequests 는 이 응답에서 조달을 요청한 데이터(없으면 빈 배열).
      */
     public record AgentResult(
-            String text, List<ChatTable> tables, String finishReason,
+            String text, List<ChatTable> tables, FinishReason finishReason,
             List<String> recommendQuestion, List<DataRequest> dataRequests) {
     }
 
@@ -196,7 +197,7 @@ public class ChatAgent {
             LlmTurn turn = llm.next(messages, specs);
             if (turn instanceof LlmTurn.Final fin) {
                 List<String> recommendQuestion = suggestFollowups(messages, fin.content());
-                return new AgentResult(fin.content(), tables, "stop", recommendQuestion, dataRequests);
+                return new AgentResult(fin.content(), tables, FinishReason.STOP, recommendQuestion, dataRequests);
             }
 
             List<LlmToolCall> toolCalls = ((LlmTurn.ToolCalls) turn).toolCalls();
@@ -229,7 +230,7 @@ public class ChatAgent {
         }
         return new AgentResult(
                 lastTool != null ? lastTool : "요청을 완료하지 못했습니다. 좀 더 구체적으로 질문해 주세요.",
-                tables, "length", List.of(), dataRequests);
+                tables, FinishReason.LENGTH, List.of(), dataRequests);
     }
 
     /**
