@@ -1,16 +1,19 @@
 #!/bin/bash
-# fdc-agent-be(Node, :8081) vs fdc-agent-be-spring(:8080) 응답 패리티 diff — 24케이스.
+# fdc-agent-be(Node, :8081) vs fdc-agent-be-spring(:8080) 응답 패리티 diff.
 #
 # 사전 조건: 두 서버가 같은 설정(fixture + mock LLM)으로 떠 있어야 한다.
 #   터미널 1: (cd ../fdc-agent-be && PORT=8081 pnpm dev)
 #   터미널 2: ./gradlew bootRun
 # 실행: ./scripts/parity.sh   (jq 필요)
-# 기준선: 2026-07-17 — 24케이스 전부 byte-identical (SSE 는 messageId 만 정규화).
+# 기준선: 2026-07-17 — 당시 24케이스 전부 byte-identical (SSE 는 messageId 만 정규화).
 #
-# ⚠ 2026-07-21 — 스킬 케이스는 더 이상 비교 대상이 아니다. Node 판은 deprecated
-# (2026-07-18) 라 spec v2 를 받지 않으므로, 이 스킬 spec 은 v1(valueRules·
-# output.template)이고 Spring 은 v2(produces·avoid·examples)다. 설비 조회 등
-# 비스킬 케이스는 여전히 유효한 회귀 비교다.
+# ⚠ 비교 가능한 표면이 계속 줄고 있다. Node 판은 deprecated(2026-07-18)라 더
+# 따라오지 않는다:
+#   - 2026-07-21: 스킬 케이스 제외 — Node 는 spec v1, Spring 은 v2.
+#   - 2026-07-27: 설비 조회 케이스 제외 — Spring 이 equipment 스택을 걷어냈다.
+#     같은 질문에 Node 는 표를, Spring 은 요청 카드를 돌려주므로 비교가 성립하지
+#     않는다. 아래 남은 것은 /health·/nope·messages_required 정도다.
+# 남은 케이스가 이 정도면 스크립트 자체를 접는 편이 정직할 수 있다 — 판단 대기.
 NODE=http://localhost:8081
 SPRING=http://localhost:8080
 PASS=0
@@ -63,30 +66,9 @@ check_chat() {
 }
 
 check_get "/health"
-check_get "/api/fdc/v1/equipment/ETCH-01"
-check_get "/api/fdc/v1/equipment/CVD-03"
-check_get "/api/fdc/v1/equipment/NOPE"
-check_get "/api/fdc/v1/equipment/ETCH-01/peers"
-check_get "/api/fdc/v1/equipment/CVD-01/peers"
-check_get "/api/fdc/v1/equipment/ETCH-01/setup-events"
-check_get "/api/fdc/v1/equipment/CVD-02/setup-events"
-check_get "/api/fdc/v1/equipment/ETCH-01/compare?peerId=ETCH-02&recipe=RECIPE_X&window=7"
-check_get "/api/fdc/v1/equipment/ETCH-01/compare?peerId=ETCH-03&recipe=RECIPE_Y&window=1"
-check_get "/api/fdc/v1/equipment/CVD-01/compare?peerId=CVD-02&recipe=RECIPE_Z&window=30"
-check_get "/api/fdc/v1/equipment/ETCH-02/compare?peerId=ETCH-01&recipe=RECIPE_X&window=1"
-check_get "/api/fdc/v1/equipment/ETCH-01/compare?recipe=RECIPE_X"
-check_get "/api/fdc/v1/equipment/ETCH-01/compare?peerId=ETCH-02&recipe=BAD"
-check_get "/api/fdc/v1/equipment/ETCH-01/compare?peerId=ETCH-02&recipe=RECIPE_X&window=3"
-check_get "/api/fdc/v1/equipment/ETCH-01/compare?peerId=ETCH-02&recipe=RECIPE_X&window=abc"
 check_get "/api/fdc/v1/nope"
 
-check_chat '{"messages":[{"role":"user","content":"ETCH-01 설비 정보 보여줘"}]}' "detail"
-check_chat '{"messages":[{"role":"user","content":"ETCH-01 동종 설비 알려줘"}]}' "peers"
-check_chat '{"messages":[{"role":"user","content":"ETCH-01 셋업 이력"}]}' "events"
-check_chat '{"messages":[{"role":"user","content":"안녕하세요"}]}' "generic"
-check_chat '{"messages":[{"role":"user","content":"S-0004 센서 설명해줘"}]}' "skill-explain"
 check_chat '{"messages":[]}' "messages_required"
-check_chat '{"messages":[{"role":"user","content":"분석"}],"context":[{"equipment":"ETCH-01","chambers":[{"sensors":[{"name":"5"}]}]}],"timeRange":{"start":"2026-05-01","end":"2026-05-07"}}' "form-context"
 
 echo "----------------------------------------"
 echo "PASS=$PASS FAIL=$FAIL"

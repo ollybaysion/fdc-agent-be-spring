@@ -6,7 +6,6 @@ import fdc.agent.chat.ChatAgent;
 import fdc.agent.chat.ChatAgent.AgentResult;
 import fdc.agent.chat.ChatAgent.HistoryMessage;
 import fdc.agent.contract.Role;
-import fdc.agent.data.fixtures.FixtureRepo;
 import fdc.agent.llm.LlmTypes.LlmClient;
 import fdc.agent.llm.LlmTypes.LlmMessage;
 import fdc.agent.llm.LlmTypes.LlmTurn;
@@ -34,7 +33,7 @@ class ChatFollowupsTest {
     }
 
     private static AgentResult run(LlmClient llm, String content) {
-        ChatAgent agent = new ChatAgent(llm, new FixtureRepo(), SkillRegistry.FIXTURE_SKILL_QUERY);
+        ChatAgent agent = new ChatAgent(llm, SkillRegistry.FIXTURE_SKILL_QUERY);
         return agent.run(List.of(new HistoryMessage(Role.USER, content)), null);
     }
 

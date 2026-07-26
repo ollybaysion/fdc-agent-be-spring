@@ -29,8 +29,8 @@
 | LLM 클라이언트 | **`java.net.http` 직구현** (OpenAiLlm) | OpenAI 호환 온프렘 GW 대응. 툴 루프(MAX_STEPS=4)가 작고 명시적이라 프레임워크(Spring AI) 없이 동작 보존 우선. mock ↔ openai seam 유지 |
 | 검증·에러 | 컨트롤러 명시 검증 + `@RestControllerAdvice` | 입력 캡(100/10k) 재적용, API.md 에러코드 미러링, prod 5xx 상세 마스킹 |
 | 로깅 | **SLF4J/Logback + MDC** | `X-Request-Id` 전파. 요청 헤더는 애초에 로깅 안 함 — 로깅 확장 시 민감 헤더 마스킹 필수 |
-| 테스트 | **JUnit 5 + Spring Boot Test/MockMvc** | vitest 스위트 1:1 포팅(31 테스트). MockMvc = Fastify `.inject()` 대응 |
-| 회귀 판정 | **패리티 하네스** = `scripts/parity.sh` (Node 판 병행 기동 + 24케이스 diff) | deprecated Node 판의 마지막 역할 — byte-identical 기준선(2026-07-17) |
+| 테스트 | **JUnit 5 + Spring Boot Test/MockMvc** | vitest 스위트에서 출발해 이제는 Spring 판이 기준. MockMvc = Fastify `.inject()` 대응 |
+| 회귀 판정 | **JUnit 스위트**. `scripts/parity.sh` 는 잔여 3케이스만 | Node 대조군은 사실상 소진 — spec v2(2026-07-21)와 equipment 스택 제거(2026-07-27)로 두 판의 응답이 갈렸다 |
 
 **참고 — v1(Node/TS) 스택**: Node 22·TS 5·pnpm·Fastify·node-oracledb·zod·pino·vitest.
 이 스택으로 Phase 0~2를 구축·검증한 뒤 2026-07-17 Spring 으로 전체 포팅 — 선정 근거는
@@ -52,18 +52,17 @@ fdc-agent-be-spring/
     │   ├── FdcAgentBeApplication.java  # 진입점 (DataSource 자동설정 제외)
     │   ├── config/    # AppProps(env 계약) · DataConfig(seam 배선) · OracleConfig(조건부 풀)
     │   │              # RequestIdFilter · ApiException(Handler)
-    │   ├── web/       # EquipmentController(정형 4 GET) · ChatController(SSE) · Health
-    │   ├── contract/  # 계약 record — EquipmentDetail·Compare·ChatTable·DonePayload…
-    │   ├── chat/      # ChatAgent(툴 루프) · EquipmentTools(손툴) · AgentTool
+    │   ├── api/       # ChatController(SSE) · Health
+    │   ├── contract/  # 계약 record — ChatTable·ChatDataSnapshot·DataRequest·DonePayload…
+    │   ├── chat/      # ChatAgent(툴 루프) · AgentTool · SnapshotDb
     │   ├── llm/       # LlmClient seam(LlmTypes 내 인터페이스): MockLlm ↔ OpenAiLlm
     │   ├── skills/    # SkillLoader·SkillRegistry — spec.json → 에이전트 툴 컴파일
-    │   ├── data/      # EquipmentRepo seam: FixtureRepo ↔ OracleEquipmentRepo(+SchemaMap)
     │   └── util/Js.java  # JS bit-parity 헬퍼 (해시·반올림·수 표기)
     ├── main/resources/
     │   ├── application.yml            # env 이름 계약 유지 (DATA_SOURCE/ORACLE_*/LLM_*)
-    │   └── skills/*.spec.json + *.wiring.json   # ★ spec v2 (형식 진실원 = agent-skill-foundry)
-    ├── test/java/fdc/agent/           # JUnit 32
-    ├── scripts/parity.sh              # 패리티 하네스 (24케이스 diff)
+    │   └── skills/*.spec.json         # ★ spec v2 (형식 진실원 = agent-knowledge-governance)
+    ├── test/java/fdc/agent/           # JUnit 44
+    ├── scripts/parity.sh              # Node 대조군 잔여 3케이스
     └── docs/phase1-사내-runbook.md    # Oracle 연결 절차 (사내 단계)
 ```
 
@@ -73,26 +72,24 @@ API 계약의 프로즈 원본은 demo-fe `API.md`+`types.ts`. Spring 판의 형
 
 1. **contract record** — 구조를 타입으로 강제 (Jackson 직렬화 규칙이 zod 의미론 재현)
 2. **JUnit 계약 테스트** — 경로·에러코드·SSE 계약
-3. **패리티 하네스** — Node 판과 응답 diff (byte-identical 기준선)
+3. ~~패리티 하네스~~ — 소진. 두 판의 응답이 갈려 더는 대조군이 아니다
+   (스킬은 2026-07-21 spec v2, 설비 조회는 2026-07-27 제거).
 
-zod 스키마는 deprecated Node 판에 남아 3번의 대조군으로만 쓰인다. 단 **스킬**
-케이스는 2026-07-21 부터 대조군이 아니다 — Node 판은 spec v2 를 받지 않으므로
-거기 spec 은 v1 로 굳었다(scripts/parity.sh 주석 참고).
-
-도메인 스킬 추가는 코드 0줄 — `resources/skills/`에 spec.json+wiring.json
-2파일을 떨구면 기동 시 자동 스캔·컴파일된다(agent-skill-foundry 산출물 접합점).
-`description` 은 spec 필드가 아니라 `scope`+`focus`+`inputs` 에서 로더가
-합성하고(SkillLoader.synthesizeDescription), 툴 인자는 `spec.inputs` 가 소유한다
-(wiring 은 bind 배선만).
+도메인 스킬 추가는 코드 0줄 — `resources/skills/`에 spec.json 하나를 떨구면
+기동 시 자동 스캔·컴파일된다. `description` 은 spec 필드가 아니라
+`scope`+`focus`+`inputs` 에서 로더가 합성하고(SkillLoader.synthesizeDescription),
+툴 인자는 `spec.inputs`, bind 배선은 `steps[].binds` 가 소유한다.
 단 oracle 모드 기준 — fixture 데모에서 새 테이블을 조회하려면
 `SkillRegistry.FIXTURE_SKILL_QUERY` seed 보강이 필요하다.
 
 ### HTTP 표면 · 문서 포인터
 
-- `GET /health` · 정형 4 GET `/api/fdc/v1/equipment/{id}[ /peers | /setup-events | /compare ]`
+- `GET /health`
 - `POST /api/fdc/v1/chat` — SSE `token* → done | error`. 에이전트 실행은
   스트리밍 전 완료(실패는 정상 HTTP 에러로).
-- 빌드·기동·패리티 재검증 절차 = `README.md`, 계약 프로즈 원본 = demo-fe
+- 정형 조회 GET 은 없다. 설비·챔버·센서를 포함해 **모든 데이터는 스킬 툴로
+  조회하거나, 닿지 않으면 `dataRequests` 로 사용자에게 조달을 요청**한다.
+- 빌드·기동 절차 = `README.md`, 계약 프로즈 원본 = demo-fe
   `API.md`+`types.ts`, Oracle 연결 절차 = `docs/phase1-사내-runbook.md`.
 
 ---
@@ -150,10 +147,9 @@ BACKEND_URL=http://fdc-agent-be:8080     # ★ origin만! /api/fdc/v1 붙이지 
 2. ~~온프렘 모델 tool calling 지원 여부~~ — **해소** (Node·Spring 양판 모두
    실 Claude 로 툴 루프 end-to-end 실증 — Spring 판은 FE 연동 라이브 데모
    2026-07-17. 사내 GW 는 env 3개만 교체).
-3. **Oracle 연결 = 사내 남음, 작업은 두 곳** — ① `SchemaMap.java` `TODO_`
-   치환(정형 3 GET 은 이것만으로 완성), ② compare 분석 SQL 실구현
-   (`OracleEquipmentRepo.getCompare`, 현재 501). 절차 = 이 레포
-   `docs/phase1-사내-runbook.md`(Node 판 runbook 의 Java 각색 사본).
+3. **Oracle 연결 = 사내 남음, 작업은 한 곳** — 스킬 spec 의 `steps[].sql` 이
+   참조하는 테이블·컬럼을 실명으로 맞추는 것뿐이다(Java 코드 수정 없음).
+   절차 = 이 레포 `docs/phase1-사내-runbook.md`.
 
 ---
 
@@ -162,7 +158,7 @@ BACKEND_URL=http://fdc-agent-be:8080     # ★ origin만! /api/fdc/v1 붙이지 
 | Phase | 내용 | Oracle | LLM | 상태 |
 | --- | --- | --- | --- | --- |
 | 0 | contract + 스켈레톤 + fixtures + FE 배선 + chat forward | ✗(fixture) | ✗ | **완료** |
-| 1 | 정형 4 GET Oracle DAO | ✓ | ✗ | **골격 완료** (compare SQL·SchemaMap = 사내) |
+| 1 | 정형 4 GET Oracle DAO | ✓ | ✗ | **폐기 2026-07-27** — 조회는 스킬 + 데이터 요청으로 일원화 |
 | 2 | chat 에이전트 + skill-loader + 폼 분석 + 후속질문 | ✓ | ✓ | **완료** (실 Claude 입증) |
 | — | **Spring 전체 포팅** (패리티 24 byte-identical + JUnit 31) | ✓ | ✓ | **완료** — 이후 기준 구현 |
 | 3 | summary(LLM 요약) + upload(이미지, magic-byte 검증) | ✓ | ✓ | 미착수 — **이 레포에서 진행** |
@@ -180,8 +176,9 @@ Phase 3 이후 모든 신규 작업은 이 레포에서만 진행한다.
 - production 에서 SSE `error.message`·5xx body 에 stack/내부경로/DB메시지 금지
   (고정 문자열로 마스킹), 상세는 로그만.
 - 모든 응답 `X-Request-Id`(+`X-Fdc-Data-Source`).
-- Oracle: **read-only 계정 + 파라미터 바인딩(SQL injection 차단)** + 식별자
-  화이트리스트(`assertIdent`), 풀 상한. LLM 은 SQL 텍스트 비노출(메뉴판 방식).
+- Oracle: **read-only 계정 + 파라미터 바인딩(SQL injection 차단)**, 풀 상한.
+  SQL 은 스킬 spec 이 소유하고 LLM 은 인자만 채운다(메뉴판 방식) — 식별자를
+  사용자 입력으로 조립하는 경로가 없다.
 - 요청 헤더는 로깅하지 않음(민감 헤더 노출 경로 자체가 없음 — 로깅 확장 시
   마스킹 필수).
 
@@ -201,6 +198,7 @@ Phase 3 이후 모든 신규 작업은 이 레포에서만 진행한다.
 모든 기능이 이 레포에 승계됨. 남은 용도:
 
 - **계약 레퍼런스** — zod 스키마(`packages/contract`)·vitest 계약 테스트는 형태 논쟁 시 참고 원본.
-- **패리티 대조군** — 회귀 의심 시 두 서버를 나란히 띄워 diff (Node `:8081` ↔ Spring `:8080`).
+- ~~패리티 대조군~~ — 소진. Spring 이 spec v2(2026-07-21)와 equipment 스택 제거
+  (2026-07-27)로 갈라져, 같은 질문에 Node 는 표를 Spring 은 요청 카드를 돌려준다.
 
 사내 이관 대상은 **이 레포 단독** — Node 판은 이관하지 않는다.

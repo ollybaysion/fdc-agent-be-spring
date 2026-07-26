@@ -10,7 +10,6 @@ import fdc.agent.contract.FinishReason;
 import fdc.agent.contract.InputRequest;
 import fdc.agent.contract.QueryScope;
 import fdc.agent.contract.Role;
-import fdc.agent.data.EquipmentRepo;
 import fdc.agent.llm.LlmTypes.LlmClient;
 import fdc.agent.llm.LlmTypes.LlmMessage;
 import fdc.agent.llm.LlmTypes.LlmToolCall;
@@ -29,12 +28,12 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 채팅 에이전트 루프. LLM 이 툴을 부르면 repo 로
- * 실행해 결과를 되먹이고, 최종 답이 나오면 텍스트 + 수집한 표를 돌려준다.
- * LLM(mock/openai)·데이터(fixture/oracle)는 seam 뒤라 이 루프는 무지.
+ * 채팅 에이전트 루프. LLM 이 툴을 부르면 실행해 결과를 되먹이고,
+ * 최종 답이 나오면 텍스트 + 수집한 표를 돌려준다.
+ * LLM(mock/openai)·스킬 출처(번들/akg)는 seam 뒤라 이 루프는 무지.
  *
- * 툴 = 설비 조회(손툴) + 도메인 스킬(spec 컴파일). FE "설비 정보 입력" 폼
- * (설비·센서·기간)은 FormContext 로 들어와 프롬프트에 주입된다.
+ * 툴 = 도메인 스킬(spec 컴파일) + query_snapshot(붙여넣은 표). 스킬로 닿지
+ * 않는 데이터는 실행하지 않고 request_data 로 사용자에게 조달을 요청한다.
  */
 public class ChatAgent {
 
@@ -107,18 +106,16 @@ public class ChatAgent {
     }
 
     private final LlmClient llm;
-    private final EquipmentRepo repo;
     private final SkillQuery skillQuery;
     private final SkillSource skillSource;
 
-    public ChatAgent(LlmClient llm, EquipmentRepo repo, SkillQuery skillQuery) {
-        this(llm, repo, skillQuery, SkillRegistry::bundledSpecs);
+    public ChatAgent(LlmClient llm, SkillQuery skillQuery) {
+        this(llm, skillQuery, SkillRegistry::bundledSpecs);
     }
 
     /** skillSource = 스킬 spec 출처 seam — classpath 번들 또는 akg 허브(#8). */
-    public ChatAgent(LlmClient llm, EquipmentRepo repo, SkillQuery skillQuery, SkillSource skillSource) {
+    public ChatAgent(LlmClient llm, SkillQuery skillQuery, SkillSource skillSource) {
         this.llm = llm;
-        this.repo = repo;
         this.skillQuery = skillQuery;
         this.skillSource = skillSource;
     }
@@ -168,10 +165,9 @@ public class ChatAgent {
             List<HistoryMessage> history, FormContext formContext,
             List<ChatDataSnapshot> dataSnapshots, SnapshotDb snapshotDb,
             Map<String, Map<String, String>> providedInputs, QueryScope scope) {
-        // 설비 조회 툴 + 도메인 스킬 툴(explain-sensor / trace-reading 등 자동 로드)
+        // 도메인 스킬 툴(explain-sensor / trace-reading 등 자동 로드)
         // + (붙여넣은 스냅샷이 있으면) query_snapshot 툴.
         List<AgentTool> tools = new ArrayList<>();
-        tools.addAll(EquipmentTools.buildEquipmentTools(repo));
         tools.addAll(SkillRegistry.compile(skillSource.specs(), skillQuery));
         if (snapshotDb != null) {
             tools.add(querySnapshotTool(snapshotDb));

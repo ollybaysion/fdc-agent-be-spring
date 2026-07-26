@@ -5,15 +5,17 @@
 구현한다 — FE 는 무수정, `BACKEND_URL` 오리진 스왑만으로 두 서버를 교체할 수
 있다.
 
-## 패리티 (원본 = 진실원)
+## 패리티 (역사 — 이제 진실원은 이 레포)
 
-원본 Node 판이 계약의 진실원이며, 이 포팅의 합격 기준은 **응답 패리티**다.
-두 서버를 나란히 띄우고(Node :8081, Spring :8080) 같은 요청을 보내 비교한
-결과, 정형 4 GET(전 레시피/윈도우 조합·에러 경로 포함)과 chat SSE
-(mock LLM 토큰 스트림·done 페이로드·스킬 조회·폼 컨텍스트)까지 **24 케이스
-전부 byte-identical** (2026-07-17, `messageId` 타임스탬프만 정규화).
+포팅의 합격 기준은 원본 Node 판과의 **응답 패리티**였고, 2026-07-17 기준
+**24 케이스 전부 byte-identical** 로 통과했다(`messageId` 타임스탬프만 정규화).
 
-핵심 포팅 규칙:
+그 뒤 두 판은 갈라졌다 — 스킬 spec v2(2026-07-21), 그리고 equipment 스택 제거
+(2026-07-27). 같은 질문에 Node 는 설비 표를, 이 레포는 데이터 요청 카드를
+돌려주므로 비교가 성립하지 않는다. 회귀 판정은 JUnit 스위트가 맡고,
+`scripts/parity.sh` 에는 아직 비교 가능한 3케이스만 남아 있다.
+
+핵심 포팅 규칙(승계):
 
 - fixture 의 결정론 mock 은 JS 와 bit-호환(`util/Js.java` — 32-bit 오버플로
   해시, JS `Math.round` 의미론, 정수는 소수점 없이 직렬화).
@@ -31,7 +33,7 @@
 | node-oracledb pool | HikariCP + `JdbcClient` (oracle 모드에서만 활성) |
 | openai SDK → 온프렘 GW | `java.net.http.HttpClient` 직구현 (`llm/OpenAiLlm`) |
 | env.ts fail-fast | `@ConfigurationProperties` (`config/AppProps`) |
-| vitest `.inject()` | JUnit 5 + MockMvc (원본 테스트 1:1 포팅, 31 테스트) |
+| vitest `.inject()` | JUnit 5 + MockMvc (44 테스트) |
 
 시임(seam)은 원본과 동일: `DATA_SOURCE`(fixture↔oracle), `LLM_BASE_URL`
 (mock↔openai), 스킬 spec.json 은 **언어 중립 진실원**으로 그대로 복사해
@@ -44,7 +46,7 @@
 # toolchain 자동 다운로드는 미구성 — 시스템 java 가 21 이 아니면 JAVA_HOME 지정:
 export JAVA_HOME=/path/to/jdk-21
 ./gradlew bootRun          # fixture + mock LLM, :8080
-./gradlew test             # 테스트 31개
+./gradlew test             # 테스트 44개
 ```
 
 환경 변수(이름은 Node 판 `.env` 계약 그대로):
@@ -61,22 +63,21 @@ LLM_API_KEY / LLM_MODEL
 demo-fe 쪽은 `BACKEND_URL=http://<host>:8080` — **오리진만**, `/api/fdc/v1`
 붙이지 말 것.
 
-## 패리티 재검증
+## HTTP 표면
 
-```bash
-# 터미널 1: Node 판
-cd ../fdc-agent-be && PORT=8081 pnpm dev
-# 터미널 2: Spring 판
-./gradlew bootRun
-# 터미널 3: 24케이스 하네스 (SSE 는 messageId 만 정규화, jq 필요)
-./scripts/parity.sh
-```
+- `GET /health`
+- `POST /api/fdc/v1/chat` — SSE `token* → done | error`
 
-## 사내 이관 포인트 (원본과 동일)
+정형 조회 GET 은 없다. 설비·챔버·센서를 포함해 모든 데이터는 **도메인 스킬
+툴로 조회**하고, 스킬로 닿지 않으면 `done.dataRequests` 로 사용자에게 조달을
+요청한다(BE 가 값을 지어내지 않는다).
 
-1. `data/oracle/SchemaMap.java` — TODO_ placeholder 를 실 테이블/컬럼명으로
-   치환(유일하게 채우는 파일, `assertIdent` 화이트리스트 검증).
-2. `getCompare` Oracle SQL — 분석 쿼리는 사내 작성 필요(501 로 표시).
+## 사내 이관 포인트
+
+1. 스킬 spec 의 `steps[].sql` — 테이블·컬럼을 실 스키마 이름으로 맞춘다.
+   spec 의 진실원은 akg 이므로 거기서 고쳐 내려받는 것이 정식 경로
+   (`AKG_URL` 미설정 시 `src/main/resources/skills/` 번들 사용).
+2. `DATA_SOURCE=oracle` + `ORACLE_*` — read-only 계정으로 전환.
 3. `LLM_BASE_URL/KEY/MODEL` — 온프렘 OpenAI 호환 GW 로 설정.
-4. 실 도메인 스킬 spec.json — `src/main/resources/skills/` 에 spec+wiring
-   쌍을 떨구면 코드 수정 없이 툴로 등록(레포엔 데모 골든만).
+
+절차 상세 = `docs/phase1-사내-runbook.md`.

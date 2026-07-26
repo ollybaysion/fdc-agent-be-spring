@@ -10,7 +10,6 @@ import fdc.agent.chat.ChatAgent;
 import fdc.agent.chat.ChatAgent.AgentResult;
 import fdc.agent.chat.ChatAgent.HistoryMessage;
 import fdc.agent.contract.Role;
-import fdc.agent.data.fixtures.FixtureRepo;
 import fdc.agent.llm.MockLlm;
 import fdc.agent.skills.SkillLoader;
 import fdc.agent.skills.SkillQuery;
@@ -255,7 +254,7 @@ class SkillLoaderTest {
     @Test
     void 에이전트와_스킬_통합_센서_질문이면_스킬_툴_호출과_조회_데이터가_응답에_실린다() {
         ChatAgent agent = new ChatAgent(
-                new MockLlm(), new FixtureRepo(), SkillRegistry.FIXTURE_SKILL_QUERY);
+                new MockLlm(), SkillRegistry.FIXTURE_SKILL_QUERY);
         AgentResult result = agent.run(
                 List.of(new HistoryMessage(Role.USER, "S-0004 센서 설명해줘")), null);
         assertThat(result.text()).contains("S-0004");
