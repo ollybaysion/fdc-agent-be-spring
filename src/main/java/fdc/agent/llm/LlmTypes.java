@@ -1,5 +1,6 @@
 package fdc.agent.llm;
 
+import fdc.agent.contract.Role;
 import java.util.List;
 import java.util.Map;
 
@@ -15,22 +16,22 @@ public final class LlmTypes {
 
     /** OpenAI 호환 대화 메시지(툴 호출/결과 포함). content 는 툴만 호출 시 null. */
     public record LlmMessage(
-            String role,
+            Role role,
             String content,
             List<LlmToolCall> toolCalls,
             String toolCallId,
             String name) {
 
-        public static LlmMessage of(String role, String content) {
+        public static LlmMessage of(Role role, String content) {
             return new LlmMessage(role, content, null, null, null);
         }
 
         public static LlmMessage assistantToolCalls(List<LlmToolCall> toolCalls) {
-            return new LlmMessage("assistant", null, toolCalls, null, null);
+            return new LlmMessage(Role.ASSISTANT, null, toolCalls, null, null);
         }
 
         public static LlmMessage toolResult(String toolCallId, String name, String content) {
-            return new LlmMessage("tool", content, null, toolCallId, name);
+            return new LlmMessage(Role.TOOL, content, null, toolCallId, name);
         }
     }
 
