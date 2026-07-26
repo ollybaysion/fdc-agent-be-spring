@@ -11,7 +11,7 @@ import java.util.List;
  */
 public record ChatDonePayload(
         String messageId,
-        String finishReason,
+        FinishReason finishReason,
         @JsonInclude(JsonInclude.Include.NON_NULL) List<ChatTable> tables,
         @JsonInclude(JsonInclude.Include.NON_NULL) List<String> recommendQuestion,
         @JsonInclude(JsonInclude.Include.NON_NULL) List<DataRequest> dataRequests) {
