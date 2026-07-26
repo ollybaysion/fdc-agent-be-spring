@@ -16,7 +16,7 @@ logging:
     root: ${LOG_LEVEL:info}
 
 fdc:
-  # development | production | test (NODE_ENV 계약 유지)
+  # development | production | restricted (NODE_ENV 계약 유지)
   env: ${NODE_ENV:development}
   # fixture(Phase 0) | oracle(Phase 1)
   data-source: ${DATA_SOURCE:fixture}

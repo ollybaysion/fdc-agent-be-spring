@@ -17,8 +17,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * seam 배선. DATA_SOURCE / LLM_BASE_URL 에 따라
- * fixture↔oracle, mock↔openai 구현을 갈아끼운다.
+ * seam 배선. env(restricted 면 외부 차단) + 리소스 설정에 따라
+ * mock↔openai, 번들↔akg 를 갈아끼운다. fixture↔oracle 는 dataSource 로 별개.
  */
 @Configuration
 public class DataConfig {
@@ -40,7 +40,7 @@ public class DataConfig {
     @Bean
     public LlmClient llmClient(AppProps props) {
         AppProps.Llm llm = props.llm();
-        return llm.baseUrl() != null && !llm.baseUrl().isEmpty()
+        return !props.isRestricted() && llm.isConfigured()
                 ? new OpenAiLlm(llm.baseUrl(), llm.apiKey(), llm.model())
                 : new MockLlm();
     }
@@ -52,8 +52,7 @@ public class DataConfig {
     @Bean
     public SkillSource skillSource(AppProps props) {
         AppProps.Akg akg = props.akg();
-        boolean hubOn = akg != null && akg.url() != null && !akg.url().isEmpty();
-        return hubOn
+        return !props.isRestricted() && akg.isConfigured()
                 ? new AkgSkillSource(akg.url(), akg.token(), akg.refreshSeconds())
                 : SkillRegistry::bundledSpecs;
     }
