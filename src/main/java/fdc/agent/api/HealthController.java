@@ -1,4 +1,4 @@
-package fdc.agent.web;
+package fdc.agent.api;
 
 import java.util.Map;
 import org.springframework.web.bind.annotation.GetMapping;

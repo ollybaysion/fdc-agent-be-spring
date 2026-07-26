@@ -17,8 +17,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * seam 배선(Node 판 data/repo.ts getRepo · llm/client.ts getLlm ·
- * skills/registry.ts getSkillQuery 대응). DATA_SOURCE / LLM_BASE_URL 에 따라
+ * seam 배선. DATA_SOURCE / LLM_BASE_URL 에 따라
  * fixture↔oracle, mock↔openai 구현을 갈아끼운다.
  */
 @Configuration

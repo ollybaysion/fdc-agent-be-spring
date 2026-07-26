@@ -4,7 +4,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
- * 검증된 런타임 설정(Node 판 env.ts 대응). 환경 변수 이름 계약(DATA_SOURCE,
+ * 검증된 런타임 설정. 환경 변수 이름 계약(DATA_SOURCE,
  * ORACLE_*, LLM_*)은 application.yml 의 placeholder 가 유지한다.
  */
 @ConfigurationProperties(prefix = "fdc")

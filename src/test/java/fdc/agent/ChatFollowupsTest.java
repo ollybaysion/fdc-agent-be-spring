@@ -14,8 +14,8 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
- * Node 판 test/chat.followups.test.ts 포팅 — recommendQuestion(추천 후속
- * 질문) 파싱·상한·실패 폴백을 fake LLM 으로 결정적으로 확인한다.
+ * recommendQuestion(추천 후속 질문) 파싱·상한·실패 폴백을 fake LLM 으로
+ * 결정적으로 확인한다.
  */
 class ChatFollowupsTest {
 

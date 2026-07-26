@@ -1,8 +1,8 @@
 package fdc.agent.util;
 
 /**
- * Node 판과의 수치/해시 패리티 헬퍼. fixture 데이터가 결정론이라 JS 구현과
- * bit-호환이어야 두 서버의 응답이 일치한다(패리티 하네스 전제).
+ * 결정론적 해시/수치 포맷 헬퍼. fixture 데이터가 결정론이므로 동일 입력에는
+ * 항상 동일한 값이 나와야 한다(재현성 전제).
  */
 public final class Js {
     private Js() {
@@ -21,7 +21,7 @@ public final class Js {
     }
 
     /**
-     * JS 의 수 표기 대응: 정수값이면 소수점 없이(JSON 1720, 0.95 그대로)
+     * 수 표기: 정수값이면 소수점 없이(JSON 1720, 0.95 그대로)
      * 직렬화되도록 Long/Double 을 가려 돌려준다.
      */
     public static Number num(double v) {

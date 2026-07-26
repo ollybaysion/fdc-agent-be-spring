@@ -5,7 +5,7 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
- * ★★★ 사내에서 채우는 "단 하나의 파일" ★★★ (Node 판 schema-map.ts 대응)
+ * ★★★ 사내에서 채우는 "단 하나의 파일" ★★★
  *
  * 계약(EquipmentDetail / Compare 등)의 각 필드가 사내 Oracle 의 어느
  * 테이블·컬럼인지 매핑한다. 여기 값만 실명으로 바꾸면 OracleEquipmentRepo 의

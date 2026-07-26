@@ -19,9 +19,9 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 /**
- * demo-fe `src/demo/equipment.ts` 의 결정론 mock 을 이식한 것(Node 판
- * fixtures/mockData.ts 와 동일 로직). 해시/반올림/시각 생성이 JS 와
- * bit-호환이어야 BACKEND_URL 스왑 시 프론트가 차이를 못 느낀다.
+ * demo-fe `src/demo/equipment.ts` 의 결정론 mock 을 이식한 것. 해시/반올림/시각
+ * 생성이 원본과 값 단위로 일치해야 BACKEND_URL 스왑 시 프론트가 차이를 못
+ * 느낀다.
  */
 public final class MockData {
     private MockData() {

@@ -7,7 +7,7 @@ import fdc.agent.data.oracle.SchemaMap;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
-/** Node 판 test/schema-map.test.ts 포팅 — 식별자 화이트리스트 검증. */
+/** 식별자 화이트리스트 검증. */
 class SchemaMapTest {
 
     @Test

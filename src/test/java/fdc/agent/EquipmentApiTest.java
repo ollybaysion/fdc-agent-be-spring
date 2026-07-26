@@ -17,7 +17,7 @@ import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
 
-/** Node 판 test/equipment.test.ts 포팅 — 정형 4 GET + chat 기본 SSE/검증. */
+/** 정형 4 GET + chat 기본 SSE/검증. */
 @SpringBootTest
 @AutoConfigureMockMvc
 class EquipmentApiTest {

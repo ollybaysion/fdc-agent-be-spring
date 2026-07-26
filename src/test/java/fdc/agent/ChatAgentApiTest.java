@@ -15,7 +15,7 @@ import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
 
-/** Node 판 test/chat.agent.test.ts 포팅 — 에이전트(mock LLM) SSE 계약. */
+/** 에이전트(mock LLM) SSE 계약. */
 @SpringBootTest
 @AutoConfigureMockMvc
 class ChatAgentApiTest {

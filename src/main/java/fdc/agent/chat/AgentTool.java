@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 에이전트 툴(Node 판 chat/tools.ts 대응). LlmToolSpec(LLM 이 보는 정의) +
+ * 에이전트 툴. LlmToolSpec(LLM 이 보는 정의) +
  * execute(실제 조회). 반환은 LLM 에 되먹일 summary + done 에 실을 tables.
  *
  * 이 모양이 곧 forge-domain-skill 의 spec 이 컴파일되면 나올 결과물 —

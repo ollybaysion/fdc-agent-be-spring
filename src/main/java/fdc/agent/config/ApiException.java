@@ -1,8 +1,7 @@
 package fdc.agent.config;
 
 /**
- * HTTP 상태를 갖는 에러(Node 판의 `Object.assign(new Error(...), {statusCode})`
- * 대응). error 코드는 API.md §에러 형식의 머신 판독 코드.
+ * HTTP 상태를 갖는 에러. error 코드는 API.md §에러 형식의 머신 판독 코드.
  */
 public class ApiException extends RuntimeException {
     private final int status;

@@ -3,8 +3,8 @@ package fdc.agent.contract;
 import java.util.List;
 
 /**
- * 설비 상세(@fdc/contract equipment.ts 대응). 세션 배열 — FE 는 key 로
- * 렌더러를 고른다. 필드 구성/이름은 zod 계약과 1:1.
+ * 설비 상세. 세션 배열 — FE 는 key 로
+ * 렌더러를 고른다. 필드 구성/이름은 계약과 1:1.
  */
 public record EquipmentDetail(String id, String name, String model, List<EquipmentSection> sections) {
 

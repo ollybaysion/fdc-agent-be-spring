@@ -9,7 +9,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * Oracle 커넥션 풀(Node 판 data/oracle/pool.ts 대응). DATA_SOURCE=oracle 일
+ * Oracle 커넥션 풀. DATA_SOURCE=oracle 일
  * 때만 활성 — fixture 모드/테스트는 DataSource 없이 기동한다.
  * ojdbc thin 드라이버 = Instant Client 불필요, 19c 호환.
  */
