@@ -23,6 +23,7 @@ public class MockLlm implements LlmClient {
     // 센서 ID 패턴 (예: S-0004). 도메인 스킬(snsr_id 파라미터) 호출용.
     private static final Pattern SENSOR_RE = Pattern.compile("\\bS-\\d{3,}\\b");
     private static final String REQUEST_DATA_TOOL = "request_data";
+    private static final String REQUEST_INPUT_TOOL = "request_input";
     private static final String QUERY_SNAPSHOT_TOOL = "query_snapshot";
     // 붙여넣은 데이터를 조회하겠다는 원 질문의 신호(주입 블록은 제외하고 본다).
     // "등록 완료"는 요청 카드를 채운 뒤의 이어가기 발화 — 적재된 표를 조회해 근거로 답한다.
@@ -73,6 +74,25 @@ public class MockLlm implements LlmClient {
                     .orElse(null);
             if (skill != null) {
                 return new LlmToolCall("call_1", skill.name(), Map.of("snsr_id", sensorMatch.group()));
+            }
+        }
+
+        // 측정/추적 분석인데 param_index(센서)가 아직 없으면 — 그 값 하나를 입력 카드로
+        // 요청한다(request_input). 실 LLM 이 "무슨 값이 없는지" 판단하는 자리를 키워드로
+        // 흉내낸다. 이미 [제공된 입력]에 param_index 가 있으면 재요청하지 않는다.
+        boolean paramProvided = text.contains("[제공된 입력") && text.contains("param_index");
+        if (matches(beforeInjectedBlocks(text), "측정|추적|trace") && !paramProvided
+                && has(tools, REQUEST_INPUT_TOOL)) {
+            LlmToolSpec skill = tools.stream()
+                    .filter(t -> requiresParam(t, "param_index"))
+                    .findFirst()
+                    .orElse(null);
+            if (skill != null) {
+                return new LlmToolCall("call_1", REQUEST_INPUT_TOOL, Map.of(
+                        "skill", skill.name(),
+                        "key", "param_index",
+                        "label", "PARAM_INDEX",
+                        "description", "센서 파라미터 인덱스 (센서 이름이 아님)"));
             }
         }
 

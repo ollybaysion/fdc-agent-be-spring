@@ -14,5 +14,6 @@ public record ChatDonePayload(
         FinishReason finishReason,
         @JsonInclude(JsonInclude.Include.NON_NULL) List<ChatTable> tables,
         @JsonInclude(JsonInclude.Include.NON_NULL) List<String> recommendQuestion,
-        @JsonInclude(JsonInclude.Include.NON_NULL) List<DataRequest> dataRequests) {
+        @JsonInclude(JsonInclude.Include.NON_NULL) List<DataRequest> dataRequests,
+        @JsonInclude(JsonInclude.Include.NON_NULL) List<InputRequest> inputRequests) {
 }

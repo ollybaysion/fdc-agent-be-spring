@@ -7,6 +7,7 @@ import fdc.agent.contract.ChatDataSnapshot;
 import fdc.agent.contract.ChatTable;
 import fdc.agent.contract.DataRequest;
 import fdc.agent.contract.FinishReason;
+import fdc.agent.contract.InputRequest;
 import fdc.agent.contract.Role;
 import fdc.agent.data.EquipmentRepo;
 import fdc.agent.llm.LlmTypes.LlmClient;
@@ -41,6 +42,9 @@ public class ChatAgent {
     /** 조달 요청 툴 이름 — 실 조회 툴과 달리 실행하지 않고 요청으로 수집한다. */
     private static final String REQUEST_DATA_TOOL = "request_data";
 
+    /** 입력 요청 툴 이름 — 스킬 인자(스칼라) 하나를 사용자에게 입력받는다(실행 안 함). */
+    private static final String REQUEST_INPUT_TOOL = "request_input";
+
     /** 붙여넣은 스냅샷 임시 DB 를 SELECT 로 조회하는 툴 이름(Design B). */
     private static final String QUERY_SNAPSHOT_TOOL = "query_snapshot";
 
@@ -53,6 +57,9 @@ public class ChatAgent {
             "DB 에 직접 조회할 수 없어 필요한 데이터를 얻지 못하면, 값을 지어내지 말고 request_data 툴로",
             "사용자에게 조달을 요청하라 — 안정적인 snake_case queryKey 와, 가능하면 실행할 SQL 을 함께 준다.",
             "이미 [제공된 데이터]로 받은 것(같은 queryKey)은 다시 요청하지 않는다.",
+            "스킬에 필요한 값(설비·PARAM_INDEX 등)이 폼·대화에 없으면, 프로즈로 길게 되묻지 말고 request_input 툴로",
+            "그 값 하나를 입력 카드로 요청하라 — 진행하려는 스킬(툴) 이름을 skill 로, 인자 이름을 key 로 준다.",
+            "이미 [제공된 입력]으로 받은 값은 다시 요청하지 말고 그 스킬을 그 값으로 이어서 진행한다.",
             "사용자가 붙여넣어 임시 DB(SQLite)로 적재된 표가 있으면, 값을 추측하지 말고 query_snapshot 툴에",
             "SELECT 문을 주어 조회한 결과를 근거로 삼는다(사용 가능한 테이블·컬럼은 [제공된 데이터]에 있다).",
             // FE(MessageBubble)는 답변을 Markdown(GFM)으로 렌더한다 — 서식을 명시하지
@@ -90,10 +97,12 @@ public class ChatAgent {
     /**
      * finishReason: "stop" | "length". recommendQuestion 은 실패/미지원 시 빈 배열.
      * dataRequests 는 이 응답에서 조달을 요청한 데이터(없으면 빈 배열).
+     * inputRequests 는 이 응답에서 입력 카드로 요청한 스칼라 값(없으면 빈 배열).
      */
     public record AgentResult(
             String text, List<ChatTable> tables, FinishReason finishReason,
-            List<String> recommendQuestion, List<DataRequest> dataRequests) {
+            List<String> recommendQuestion, List<DataRequest> dataRequests,
+            List<InputRequest> inputRequests) {
     }
 
     private final LlmClient llm;
@@ -114,16 +123,27 @@ public class ChatAgent {
     }
 
     public AgentResult run(List<HistoryMessage> history, FormContext formContext) {
-        return run(history, formContext, null);
+        return run(history, formContext, null, null);
     }
 
     public AgentResult run(
             List<HistoryMessage> history, FormContext formContext, List<ChatDataSnapshot> dataSnapshots) {
+        return run(history, formContext, dataSnapshots, null);
+    }
+
+    /**
+     * @param inputs 사용자가 입력 카드로 채워 되보낸 스칼라 값 — 스킬로 네임스페이스된
+     *     {@code {skill: {key: value}}}. 프롬프트에 주입되고, 같은 (skill,key) 는
+     *     {@code request_input} 재요청이 억제된다(왕복 종료 보장). 없으면 null.
+     */
+    public AgentResult run(
+            List<HistoryMessage> history, FormContext formContext,
+            List<ChatDataSnapshot> dataSnapshots, Map<String, Map<String, String>> inputs) {
         // 붙여넣은 스냅샷(행 있음) → 요청 단위 인메모리 SQLite(Design B). 없으면 null.
         // 요청이 끝나면 연결을 닫는다(finally) — 여러 반환점을 감싸려 루프를 분리한다.
         SnapshotDb snapshotDb = SnapshotDb.build(dataSnapshots);
         try {
-            return runLoop(history, formContext, dataSnapshots, snapshotDb);
+            return runLoop(history, formContext, dataSnapshots, snapshotDb, inputs);
         } finally {
             if (snapshotDb != null) {
                 snapshotDb.close();
@@ -133,7 +153,8 @@ public class ChatAgent {
 
     private AgentResult runLoop(
             List<HistoryMessage> history, FormContext formContext,
-            List<ChatDataSnapshot> dataSnapshots, SnapshotDb snapshotDb) {
+            List<ChatDataSnapshot> dataSnapshots, SnapshotDb snapshotDb,
+            Map<String, Map<String, String>> providedInputs) {
         // 설비 조회 툴 + 도메인 스킬 툴(explain-sensor / trace-reading 등 자동 로드)
         // + (붙여넣은 스냅샷이 있으면) query_snapshot 툴.
         List<AgentTool> tools = new ArrayList<>();
@@ -147,8 +168,9 @@ public class ChatAgent {
         List<LlmToolSpec> specs = new ArrayList<>(tools.stream()
                 .map(t -> new LlmToolSpec(t.name(), t.description(), t.parameters()))
                 .toList());
-        // 조달 요청 툴 — 실행 툴이 아니라 "이 데이터가 필요하다"를 수집하는 특수 툴.
+        // 조달 요청 툴 + 입력 요청 툴 — 실행 툴이 아니라 "이게 필요하다"를 수집하는 특수 툴.
         specs.add(requestDataSpec());
+        specs.add(requestInputSpec());
 
         // 이미 제공된 스냅샷의 queryKey — 같은 키의 요청은 억제(왕복 종료 보장).
         Set<String> suppliedKeys = new HashSet<>();
@@ -162,6 +184,12 @@ public class ChatAgent {
         List<DataRequest> dataRequests = new ArrayList<>();
         Set<String> requestedKeys = new HashSet<>();
 
+        // 이미 채워진 입력(skill.key) — 같은 입력 요청은 억제. request_input 도 같은
+        // 왕복 종료 규율을 따른다: 제공된 값은 다시 카드로 내보내지 않는다.
+        Set<String> providedInputKeys = providedInputKeys(providedInputs);
+        List<InputRequest> inputRequests = new ArrayList<>();
+        Set<String> requestedInputKeys = new HashSet<>();
+
         List<LlmMessage> messages = new ArrayList<>();
         messages.add(LlmMessage.of(Role.SYSTEM, SYSTEM_PROMPT));
         List<LlmMessage> hist = new ArrayList<>(history.stream()
@@ -173,7 +201,8 @@ public class ChatAgent {
         // 마지막 사용자 메시지에 덧붙인다 — 약한 모델도 요청의 일부로 확실히 반영
         // (값이 다 있으면 바로 분석, 붙여넣은 데이터가 있으면 그걸 근거로).
         String note = joinNotes(
-                formatFormContext(formContext), formatDataSnapshots(dataSnapshots, snapshotDb));
+                formatFormContext(formContext), formatDataSnapshots(dataSnapshots, snapshotDb),
+                formatProvidedInputs(providedInputs));
         if (note != null) {
             int lastUser = -1;
             for (int i = hist.size() - 1; i >= 0; i--) {
@@ -198,7 +227,8 @@ public class ChatAgent {
             LlmTurn turn = llm.next(messages, specs);
             if (turn instanceof LlmTurn.Final fin) {
                 List<String> recommendQuestion = suggestFollowups(messages, fin.content());
-                return new AgentResult(fin.content(), tables, FinishReason.STOP, recommendQuestion, dataRequests);
+                return new AgentResult(fin.content(), tables, FinishReason.STOP,
+                        recommendQuestion, dataRequests, inputRequests);
             }
 
             List<LlmToolCall> toolCalls = ((LlmTurn.ToolCalls) turn).toolCalls();
@@ -207,6 +237,12 @@ public class ChatAgent {
                 if (REQUEST_DATA_TOOL.equals(call.name())) {
                     String ack = collectDataRequest(
                             call.arguments(), suppliedKeys, requestedKeys, dataRequests);
+                    messages.add(LlmMessage.toolResult(call.id(), call.name(), ack));
+                    continue;
+                }
+                if (REQUEST_INPUT_TOOL.equals(call.name())) {
+                    String ack = collectInputRequest(
+                            call.arguments(), providedInputKeys, requestedInputKeys, inputRequests);
                     messages.add(LlmMessage.toolResult(call.id(), call.name(), ack));
                     continue;
                 }
@@ -231,7 +267,7 @@ public class ChatAgent {
         }
         return new AgentResult(
                 lastTool != null ? lastTool : "요청을 완료하지 못했습니다. 좀 더 구체적으로 질문해 주세요.",
-                tables, FinishReason.LENGTH, List.of(), dataRequests);
+                tables, FinishReason.LENGTH, List.of(), dataRequests, inputRequests);
     }
 
     /**
@@ -313,6 +349,126 @@ public class ChatAgent {
                 "DB 에 직접 조회할 수 없어 필요한 데이터를 얻지 못할 때, 값을 지어내지 말고 이 툴로 "
                         + "사용자에게 조달을 요청한다. 이미 [제공된 데이터]로 받은 것은 다시 요청하지 않는다.",
                 params);
+    }
+
+    /**
+     * request_input 툴 호출을 입력 요청으로 수집한다(실행하지 않는다). 이미 채워진
+     * (skill,key) 이거나 이번 응답에서 이미 요청한 것이면 카드로 내보내지 않는다 —
+     * request_data 와 같은 왕복 종료 억제다. LLM 에 되먹일 확인 문구를 돌려준다.
+     */
+    private static String collectInputRequest(
+            Map<String, Object> args, Set<String> providedKeys,
+            Set<String> requestedKeys, List<InputRequest> out) {
+        InputRequest req = parseInputRequest(args);
+        if (req == null) {
+            return "입력 요청이 형식에 맞지 않아 등록하지 못했습니다(skill·key·label 필요).";
+        }
+        String dedup = inputKey(req.skill(), req.key());
+        if (providedKeys.contains(dedup) || !requestedKeys.add(dedup)) {
+            return "이미 제공되었거나 요청된 입력입니다: " + req.label() + " — 그 값으로 이어서 진행하라.";
+        }
+        out.add(req);
+        return "입력 요청을 등록했습니다: " + req.label()
+                + ". 데이터 패널의 입력 카드에 값을 넣어 주시면 그 값으로 이어서 분석합니다. 없는 값은 지어내지 않습니다.";
+    }
+
+    /** request_input 인자(느슨하게 수용)를 InputRequest 로. skill·key·label 없으면 null. */
+    private static InputRequest parseInputRequest(Map<String, Object> args) {
+        if (args == null) {
+            return null;
+        }
+        String skill = asTrimmed(args.get("skill"));
+        String key = asTrimmed(args.get("key"));
+        String label = asTrimmed(args.get("label"));
+        if (skill == null || key == null || label == null) {
+            return null;
+        }
+        return new InputRequest(skill, key, label, asTrimmed(args.get("description")));
+    }
+
+    /**
+     * request_input 툴의 LLM 노출 정의. 실행되지 않고 입력 요청으로 수집되며,
+     * done 페이로드의 inputRequests → FE 입력 카드로 렌더된다. 채운 값은 다음 요청의
+     * inputs[skill][key] 로 회신돼 프롬프트에 주입된다.
+     */
+    private static LlmToolSpec requestInputSpec() {
+        Map<String, Object> props = new LinkedHashMap<>();
+        props.put("skill", Map.of("type", "string", "description",
+                "이 값이 필요한 스킬(툴) 이름 — 지금 진행하려는 그 스킬. 회신이 이 스킬로 묶인다."));
+        props.put("key", Map.of("type", "string", "description",
+                "필요한 스킬 인자 이름(예: param_index). 사용자가 채우면 이 이름으로 회신된다."));
+        props.put("label", Map.of("type", "string", "description",
+                "사람이 읽는 입력 이름 — 화면 카드에 표시된다(예: PARAM_INDEX)."));
+        props.put("description", Map.of("type", "string", "description",
+                "무슨 값을 넣어야 하는지 짧은 안내(선택)."));
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("type", "object");
+        params.put("properties", props);
+        params.put("required", List.of("skill", "key", "label"));
+        return new LlmToolSpec(REQUEST_INPUT_TOOL,
+                "스킬에 필요한 값(설비·PARAM_INDEX 등)이 폼·대화에 없을 때, 프로즈로 되묻지 말고 이 "
+                        + "툴로 그 값 하나를 사용자에게 입력받는다. 이미 [제공된 입력]으로 받은 것은 다시 요청하지 않는다.",
+                params);
+    }
+
+    /** 억제 키 — (skill, key) 를 한 문자열로. 회신 네임스페이스와 같은 규칙. */
+    private static String inputKey(String skill, String key) {
+        return skill + " " + key;
+    }
+
+    /** 회신된 inputs 에서 이미 채워진 (skill,key) 집합 — 억제용. */
+    private static Set<String> providedInputKeys(Map<String, Map<String, String>> inputs) {
+        Set<String> keys = new HashSet<>();
+        if (inputs == null) {
+            return keys;
+        }
+        for (Map.Entry<String, Map<String, String>> e : inputs.entrySet()) {
+            if (e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            for (Map.Entry<String, String> kv : e.getValue().entrySet()) {
+                if (kv.getKey() != null && kv.getValue() != null && !kv.getValue().isBlank()) {
+                    keys.add(inputKey(e.getKey(), kv.getKey()));
+                }
+            }
+        }
+        return keys;
+    }
+
+    /**
+     * 사용자가 입력 카드로 채워 되보낸 스칼라 값을 LLM 이 읽을 한 블록으로 —
+     * 어느 스킬의 무슨 값인지 + "이미 있으니 그 스킬을 이어서 진행하라". 아무것도
+     * 없으면 null(주입 안 함). request_input 억제와 짝이라, 여기 실린 값은 다시
+     * 카드로 요청되지 않는다.
+     */
+    static String formatProvidedInputs(Map<String, Map<String, String>> inputs) {
+        if (inputs == null || inputs.isEmpty()) {
+            return null;
+        }
+        List<String> lines = new ArrayList<>();
+        lines.add("[제공된 입력 — 사용자 입력]");
+        boolean any = false;
+        for (Map.Entry<String, Map<String, String>> e : inputs.entrySet()) {
+            String skill = e.getKey();
+            Map<String, String> kv = e.getValue();
+            if (skill == null || kv == null) {
+                continue;
+            }
+            for (Map.Entry<String, String> kvE : kv.entrySet()) {
+                String k = kvE.getKey();
+                String v = kvE.getValue();
+                if (k == null || v == null || v.isBlank()) {
+                    continue;
+                }
+                lines.add("- " + skill + "." + k + " = " + v.trim());
+                any = true;
+            }
+        }
+        if (!any) {
+            return null;
+        }
+        lines.add("이 값들은 이미 제공됐다 — 다시 request_input 하지 말고 해당 스킬을 그 값으로 이어서 진행하라.");
+        return String.join("\n", lines);
     }
 
     /**
