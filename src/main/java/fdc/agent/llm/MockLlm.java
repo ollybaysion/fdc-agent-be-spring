@@ -1,5 +1,6 @@
 package fdc.agent.llm;
 
+import fdc.agent.contract.Role;
 import fdc.agent.llm.LlmTypes.LlmClient;
 import fdc.agent.llm.LlmTypes.LlmMessage;
 import fdc.agent.llm.LlmTypes.LlmToolCall;
@@ -33,7 +34,7 @@ public class MockLlm implements LlmClient {
     @Override
     public LlmTurn next(List<LlmMessage> messages, List<LlmToolSpec> tools) {
         LlmMessage last = messages.isEmpty() ? null : messages.get(messages.size() - 1);
-        if (last != null && "tool".equals(last.role())) {
+        if (last != null && last.role() == Role.TOOL) {
             return new LlmTurn.Final(last.content() != null ? last.content() : "");
         }
         String userText = lastUserText(messages);
@@ -53,7 +54,7 @@ public class MockLlm implements LlmClient {
     private static String lastUserText(List<LlmMessage> messages) {
         for (int i = messages.size() - 1; i >= 0; i--) {
             LlmMessage m = messages.get(i);
-            if ("user".equals(m.role())) {
+            if (m.role() == Role.USER) {
                 return m.content() != null ? m.content() : "";
             }
         }

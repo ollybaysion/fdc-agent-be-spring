@@ -6,6 +6,7 @@ import fdc.agent.chat.ChatAgent;
 import fdc.agent.chat.ChatAgent.AgentResult;
 import fdc.agent.chat.ChatAgent.FormContext;
 import fdc.agent.chat.ChatAgent.HistoryMessage;
+import fdc.agent.contract.Role;
 import fdc.agent.data.fixtures.FixtureRepo;
 import fdc.agent.llm.LlmTypes.LlmClient;
 import fdc.agent.llm.LlmTypes.LlmToolCall;
@@ -34,7 +35,7 @@ class AnalysisTest {
         public LlmTurn next(List<fdc.agent.llm.LlmTypes.LlmMessage> messages,
                 List<fdc.agent.llm.LlmTypes.LlmToolSpec> tools) {
             seen.add(String.join("\n", messages.stream()
-                    .map(m -> m.role() + ":" + (m.content() != null ? m.content() : ""))
+                    .map(m -> m.role().wire() + ":" + (m.content() != null ? m.content() : ""))
                     .toList()));
             return turns.get(Math.min(i.getAndIncrement(), turns.size() - 1));
         }
@@ -42,7 +43,7 @@ class AnalysisTest {
 
     private static AgentResult run(LlmClient llm, String content, FormContext formContext) {
         ChatAgent agent = new ChatAgent(llm, new FixtureRepo(), SkillRegistry.FIXTURE_SKILL_QUERY);
-        return agent.run(List.of(new HistoryMessage("user", content)), formContext);
+        return agent.run(List.of(new HistoryMessage(Role.USER, content)), formContext);
     }
 
     @Test

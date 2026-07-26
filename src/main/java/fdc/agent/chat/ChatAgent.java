@@ -7,6 +7,7 @@ import fdc.agent.contract.ChatDataSnapshot;
 import fdc.agent.contract.ChatTable;
 import fdc.agent.contract.DataRequest;
 import fdc.agent.contract.FinishReason;
+import fdc.agent.contract.Role;
 import fdc.agent.data.EquipmentRepo;
 import fdc.agent.llm.LlmTypes.LlmClient;
 import fdc.agent.llm.LlmTypes.LlmMessage;
@@ -68,7 +69,7 @@ public class ChatAgent {
     private static final ObjectMapper JSON = new ObjectMapper();
 
     /** 대화 히스토리 한 줄(FE 계약 느슨하게 수용). */
-    public record HistoryMessage(String role, String content) {
+    public record HistoryMessage(Role role, String content) {
     }
 
     /** FE 폼 입력(설비 정보 + 시간 범위). 계약 느슨하게 — BE 는 요약만 한다. */
@@ -162,10 +163,10 @@ public class ChatAgent {
         Set<String> requestedKeys = new HashSet<>();
 
         List<LlmMessage> messages = new ArrayList<>();
-        messages.add(LlmMessage.of("system", SYSTEM_PROMPT));
+        messages.add(LlmMessage.of(Role.SYSTEM, SYSTEM_PROMPT));
         List<LlmMessage> hist = new ArrayList<>(history.stream()
                 .map(m -> LlmMessage.of(
-                        "assistant".equals(m.role()) ? "assistant" : "user",
+                        m.role() == Role.ASSISTANT ? Role.ASSISTANT : Role.USER,
                         m.content() != null ? m.content() : ""))
                 .toList());
         // 폼 컨텍스트 + 사용자가 붙여넣은 데이터 스냅샷을 별도 system 메시지가 아니라
@@ -176,7 +177,7 @@ public class ChatAgent {
         if (note != null) {
             int lastUser = -1;
             for (int i = hist.size() - 1; i >= 0; i--) {
-                if ("user".equals(hist.get(i).role())) {
+                if (hist.get(i).role() == Role.USER) {
                     lastUser = i;
                     break;
                 }
@@ -186,7 +187,7 @@ public class ChatAgent {
                 hist.set(lastUser, LlmMessage.of(m.role(),
                         (m.content() != null ? m.content() : "") + "\n\n" + note));
             } else {
-                hist.add(LlmMessage.of("user", note));
+                hist.add(LlmMessage.of(Role.USER, note));
             }
         }
         messages.addAll(hist);
@@ -223,7 +224,7 @@ public class ChatAgent {
         // 스텝 한도 초과 — 마지막 툴 요약이라도 돌려준다.
         String lastTool = null;
         for (int i = messages.size() - 1; i >= 0; i--) {
-            if ("tool".equals(messages.get(i).role())) {
+            if (messages.get(i).role() == Role.TOOL) {
                 lastTool = messages.get(i).content();
                 break;
             }
@@ -324,17 +325,17 @@ public class ChatAgent {
     private List<String> suggestFollowups(List<LlmMessage> messages, String answer) {
         LlmMessage lastUser = null;
         for (int i = messages.size() - 1; i >= 0; i--) {
-            if ("user".equals(messages.get(i).role())) {
+            if (messages.get(i).role() == Role.USER) {
                 lastUser = messages.get(i);
                 break;
             }
         }
         try {
             LlmTurn turn = llm.next(List.of(
-                    LlmMessage.of("user", lastUser != null && lastUser.content() != null
+                    LlmMessage.of(Role.USER, lastUser != null && lastUser.content() != null
                             ? lastUser.content() : "이전 질문"),
-                    LlmMessage.of("assistant", answer),
-                    LlmMessage.of("user", FOLLOWUP_PROMPT)), List.of());
+                    LlmMessage.of(Role.ASSISTANT, answer),
+                    LlmMessage.of(Role.USER, FOLLOWUP_PROMPT)), List.of());
             return turn instanceof LlmTurn.Final fin ? parseQuestionArray(fin.content()) : List.of();
         } catch (RuntimeException e) {
             return List.of();

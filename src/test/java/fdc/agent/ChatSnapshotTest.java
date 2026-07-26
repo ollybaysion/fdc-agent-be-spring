@@ -6,6 +6,7 @@ import fdc.agent.chat.ChatAgent;
 import fdc.agent.chat.ChatAgent.AgentResult;
 import fdc.agent.chat.ChatAgent.HistoryMessage;
 import fdc.agent.contract.ChatDataSnapshot;
+import fdc.agent.contract.Role;
 import fdc.agent.data.fixtures.FixtureRepo;
 import fdc.agent.llm.LlmTypes.LlmClient;
 import fdc.agent.llm.LlmTypes.LlmMessage;
@@ -41,7 +42,7 @@ class ChatSnapshotTest {
         @Override
         public LlmTurn next(List<LlmMessage> messages, List<LlmToolSpec> tools) {
             seen.add(String.join("\n", messages.stream()
-                    .map(m -> m.role() + ":" + (m.content() != null ? m.content() : ""))
+                    .map(m -> m.role().wire() + ":" + (m.content() != null ? m.content() : ""))
                     .toList()));
             seenTools.add(tools);
             return turns.get(Math.min(i.getAndIncrement(), turns.size() - 1));
@@ -61,7 +62,7 @@ class ChatSnapshotTest {
     @Test
     void 행_있는_스냅샷은_스키마만_주입하고_행은_프롬프트에_넣지_않는다() {
         CaptureLlm llm = new CaptureLlm(List.of(new LlmTurn.Final("ok")));
-        agent(llm).run(List.of(new HistoryMessage("user", "이 데이터로 분석")), null, List.of(rowsSnap()));
+        agent(llm).run(List.of(new HistoryMessage(Role.USER, "이 데이터로 분석")), null, List.of(rowsSnap()));
 
         String prompt = llm.seen.get(0);
         // 스키마(테이블·컬럼)와 query_snapshot 안내는 주입된다.
@@ -81,7 +82,7 @@ class ChatSnapshotTest {
                         Map.of("sql", "SELECT * FROM \"sensor_list\"")))),
                 new LlmTurn.Final("조회 완료")));
         AgentResult result = agent(llm).run(
-                List.of(new HistoryMessage("user", "이 데이터 조회")), null, List.of(rowsSnap()));
+                List.of(new HistoryMessage(Role.USER, "이 데이터 조회")), null, List.of(rowsSnap()));
 
         assertThat(result.tables()).anyMatch(t -> t.rows().stream()
                 .anyMatch(r -> "온도".equals(r.get("SENSOR"))));
@@ -92,7 +93,7 @@ class ChatSnapshotTest {
         ChatDataSnapshot catalog = new ChatDataSnapshot("recipe", "레시피 STEP", "2026-07-22T00:00",
                 List.of("STEP_NO"), 5, null);
         CaptureLlm llm = new CaptureLlm(List.of(new LlmTurn.Final("ok")));
-        agent(llm).run(List.of(new HistoryMessage("user", "분석")), null, List.of(catalog));
+        agent(llm).run(List.of(new HistoryMessage(Role.USER, "분석")), null, List.of(catalog));
 
         String prompt = llm.seen.get(0);
         assertThat(prompt).contains("레시피 STEP").contains("내용 미첨부");
@@ -107,7 +108,7 @@ class ChatSnapshotTest {
                         Map.of("sql", "DROP TABLE \"sensor_list\"")))),
                 new LlmTurn.Final("done")));
         AgentResult result = agent(llm).run(
-                List.of(new HistoryMessage("user", "조회")), null, List.of(rowsSnap()));
+                List.of(new HistoryMessage(Role.USER, "조회")), null, List.of(rowsSnap()));
         // 가드가 막아 결과 표는 실리지 않는다(사유가 LLM 에 되먹여진다).
         assertThat(result.tables()).isEmpty();
     }

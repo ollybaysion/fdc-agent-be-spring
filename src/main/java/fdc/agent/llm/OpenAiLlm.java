@@ -3,6 +3,7 @@ package fdc.agent.llm;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import fdc.agent.config.ApiException;
+import fdc.agent.contract.Role;
 import fdc.agent.llm.LlmTypes.LlmClient;
 import fdc.agent.llm.LlmTypes.LlmMessage;
 import fdc.agent.llm.LlmTypes.LlmToolCall;
@@ -104,14 +105,14 @@ public class OpenAiLlm implements LlmClient {
 
     /** LlmMessage → OpenAI wire 형식(assistant.tool_calls / tool.tool_call_id). */
     private static Map<String, Object> toOpenAiMessage(LlmMessage m) {
-        if ("tool".equals(m.role())) {
+        if (m.role() == Role.TOOL) {
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("role", "tool");
             out.put("tool_call_id", m.toolCallId());
             out.put("content", m.content() != null ? m.content() : "");
             return out;
         }
-        if ("assistant".equals(m.role()) && m.toolCalls() != null && !m.toolCalls().isEmpty()) {
+        if (m.role() == Role.ASSISTANT && m.toolCalls() != null && !m.toolCalls().isEmpty()) {
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("role", "assistant");
             out.put("content", m.content() != null ? m.content() : "");
@@ -130,7 +131,7 @@ public class OpenAiLlm implements LlmClient {
             return out;
         }
         Map<String, Object> out = new LinkedHashMap<>();
-        out.put("role", m.role());
+        out.put("role", m.role().wire());
         out.put("content", m.content() != null ? m.content() : "");
         return out;
     }
