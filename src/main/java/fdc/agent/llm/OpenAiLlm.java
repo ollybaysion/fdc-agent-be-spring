@@ -9,6 +9,7 @@ import fdc.agent.llm.LlmTypes.LlmMessage;
 import fdc.agent.llm.LlmTypes.LlmToolCall;
 import fdc.agent.llm.LlmTypes.LlmToolSpec;
 import fdc.agent.llm.LlmTypes.LlmTurn;
+import fdc.agent.util.Trace;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -86,10 +87,14 @@ public class OpenAiLlm implements LlmClient {
         long startedAt = System.nanoTime();
         HttpResponse<String> res;
         try {
+            // 전선에 나가는 JSON 그대로 — tools[].function 의 설명·스키마가 실렸는지는
+            // 여기서만 확정된다. Authorization 헤더는 찍지 않는다.
+            String wire = JSON.writeValueAsString(body);
+            Trace.raw("BE→LLM HTTP POST " + endpoint, wire);
             HttpRequest.Builder req = HttpRequest.newBuilder(URI.create(endpoint))
                     .timeout(timeout)
                     .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(body), StandardCharsets.UTF_8));
+                    .POST(HttpRequest.BodyPublishers.ofString(wire, StandardCharsets.UTF_8));
             if (apiKey != null && !apiKey.isEmpty()) {
                 req.header("Authorization", "Bearer " + apiKey);
             }
@@ -104,6 +109,8 @@ public class OpenAiLlm implements LlmClient {
             Thread.currentThread().interrupt();
             throw new ApiException(502, "error", "LLM 요청이 중단되었습니다.");
         }
+
+        Trace.raw("LLM→BE HTTP " + res.statusCode(), res.body());
 
         if (res.statusCode() < 200 || res.statusCode() >= 300) {
             // GW 본문은 로그로만 — 무엇이 실릴지는 우리 소관이 아니라서,

@@ -18,6 +18,7 @@ import fdc.agent.llm.LlmTypes.LlmTurn;
 import fdc.agent.skills.SkillQuery;
 import fdc.agent.skills.SkillRegistry;
 import fdc.agent.skills.SkillSource;
+import fdc.agent.util.Trace;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -159,6 +160,11 @@ public class ChatAgent {
                 .map(t -> new LlmToolSpec(t.name(), t.description(), t.parameters()))
                 .toList();
 
+        // 이번 요청에서 LLM 이 실제로 보는 툴 전량(이름·설명·파라미터 스키마).
+        // query_snapshot 은 붙여넣은 표가 있을 때만 여기 있다 — 없으면 모델이 안 부른 게
+        // 아니라 애초에 부를 수 없었던 것이고, 그 구분이 진단의 절반이다.
+        Trace.emit("BE→LLM 툴 노출 (" + specs.size() + "개)", specs);
+
         List<LlmMessage> messages = ChatPrompt.messages(
                 ChatPrompt.system(tools),
                 history,
@@ -167,7 +173,9 @@ public class ChatAgent {
         List<ChatTable> tables = new ArrayList<>();
 
         for (int step = 0; step < MAX_STEPS; step++) {
+            Trace.emit("BE→LLM step " + (step + 1) + " 메시지 (" + messages.size() + "개)", messages);
             LlmTurn turn = llm.next(messages, specs);
+            Trace.emit("LLM→BE step " + (step + 1) + " 응답", turn);
             if (turn instanceof LlmTurn.Final fin) {
                 return new AgentResult(fin.content(), tables, FinishReason.STOP,
                         suggestFollowups(messages, fin.content()),
@@ -181,6 +189,7 @@ public class ChatAgent {
                 ToolResult result = tool != null
                         ? tool.run(call.arguments())
                         : ToolResult.of("알 수 없는 툴: " + call.name());
+                traceToolCall(call, result);
                 if (result.tables() != null) {
                     tables.addAll(result.tables());
                 }
@@ -209,16 +218,47 @@ public class ChatAgent {
                 break;
             }
         }
+        List<LlmMessage> followupMessages = List.of(
+                LlmMessage.of(Role.USER, lastUser != null && lastUser.content() != null
+                        ? lastUser.content() : "이전 질문"),
+                LlmMessage.of(Role.ASSISTANT, answer),
+                LlmMessage.of(Role.USER, FOLLOWUP_PROMPT));
         try {
-            LlmTurn turn = llm.next(List.of(
-                    LlmMessage.of(Role.USER, lastUser != null && lastUser.content() != null
-                            ? lastUser.content() : "이전 질문"),
-                    LlmMessage.of(Role.ASSISTANT, answer),
-                    LlmMessage.of(Role.USER, FOLLOWUP_PROMPT)), List.of());
+            Trace.emit("BE→LLM 후속 질문 요청 (툴 없음)", followupMessages);
+            LlmTurn turn = llm.next(followupMessages, List.of());
+            Trace.emit("LLM→BE 후속 질문 응답", turn);
             return turn instanceof LlmTurn.Final fin ? parseQuestionArray(fin.content()) : List.of();
         } catch (RuntimeException e) {
+            Trace.raw("후속 질문 실패 (답변은 이미 확정 — 빈 배열로 진행)", String.valueOf(e));
             return List.of();
         }
+    }
+
+    /**
+     * 툴 한 번의 왕복을 트레이스에 — LLM 이 채워 준 인자, 되먹인 요약, 딸려 나온 표.
+     * 표는 제목·컬럼·행수만 남긴다(값 전량은 done 페이로드 트레이스에서 본다).
+     * 수집 툴(request_data·request_input)도 같은 경로라 자동으로 함께 찍힌다.
+     */
+    private static void traceToolCall(LlmToolCall call, ToolResult result) {
+        if (!Trace.on()) {
+            return;
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("tool", call.name());
+        out.put("arguments", call.arguments());
+        out.put("resultSummary", result.summary());
+        if (result.tables() != null) {
+            List<Map<String, Object>> shapes = new ArrayList<>();
+            for (ChatTable t : result.tables()) {
+                Map<String, Object> shape = new LinkedHashMap<>();
+                shape.put("title", t.title());
+                shape.put("columns", t.columns());
+                shape.put("rowCount", t.rows() != null ? t.rows().size() : 0);
+                shapes.add(shape);
+            }
+            out.put("tables", shapes);
+        }
+        Trace.emit("툴 실행 " + call.name(), out);
     }
 
     /** 텍스트에서 첫 JSON 배열을 뽑아 문자열 3개까지. 실패 시 빈 배열. */

@@ -14,6 +14,15 @@ spring:
 logging:
   level:
     root: ${LOG_LEVEL:info}
+    # FE→BE→LLM 왕복 트레이스(util/Trace). 기본 켜짐 — 데이터가 전부 붙여넣기
+    # 스냅샷이라 "무엇이 실려 나갔나"가 진단의 시작점이다. 끄려면 TRACE_LOG_LEVEL=off.
+    fdc.trace: ${TRACE_LOG_LEVEL:info}
+  file:
+    # 콘솔에만 있으면 터미널을 닫는 순간 사라진다 — 파일로도 남긴다(기본 롤링 10MB×7).
+    name: ${LOG_FILE:logs/fdc-agent-be.log}
+  pattern:
+    # 한 왕복의 줄들을 X-Request-Id 로 묶는다(RequestIdFilter 가 MDC 에 넣는다).
+    level: "%5p [%X{requestId:-no-req}]"
 
 fdc:
   # development | production | restricted (NODE_ENV 계약 유지)
