@@ -8,6 +8,7 @@ import fdc.agent.contract.ChatTable;
 import fdc.agent.contract.DataRequest;
 import fdc.agent.contract.FinishReason;
 import fdc.agent.contract.InputRequest;
+import fdc.agent.contract.QueryScope;
 import fdc.agent.contract.Role;
 import fdc.agent.data.EquipmentRepo;
 import fdc.agent.llm.LlmTypes.LlmClient;
@@ -139,11 +140,23 @@ public class ChatAgent {
     public AgentResult run(
             List<HistoryMessage> history, FormContext formContext,
             List<ChatDataSnapshot> dataSnapshots, Map<String, Map<String, String>> inputs) {
+        return run(history, formContext, dataSnapshots, inputs, null);
+    }
+
+    /**
+     * @param scope 사용자가 질의 대상 트레이에 담은 것 — 이 질문이 무엇을 놓고 하는
+     *     질문인지. 담긴 분석의 조회 키도 여기 실려 오고, 그 (skill,key) 역시
+     *     {@code request_input} 재요청이 억제된다. 담긴 게 없으면 null.
+     */
+    public AgentResult run(
+            List<HistoryMessage> history, FormContext formContext,
+            List<ChatDataSnapshot> dataSnapshots, Map<String, Map<String, String>> inputs,
+            QueryScope scope) {
         // 붙여넣은 스냅샷(행 있음) → 요청 단위 인메모리 SQLite(Design B). 없으면 null.
         // 요청이 끝나면 연결을 닫는다(finally) — 여러 반환점을 감싸려 루프를 분리한다.
         SnapshotDb snapshotDb = SnapshotDb.build(dataSnapshots);
         try {
-            return runLoop(history, formContext, dataSnapshots, snapshotDb, inputs);
+            return runLoop(history, formContext, dataSnapshots, snapshotDb, inputs, scope);
         } finally {
             if (snapshotDb != null) {
                 snapshotDb.close();
@@ -154,7 +167,7 @@ public class ChatAgent {
     private AgentResult runLoop(
             List<HistoryMessage> history, FormContext formContext,
             List<ChatDataSnapshot> dataSnapshots, SnapshotDb snapshotDb,
-            Map<String, Map<String, String>> providedInputs) {
+            Map<String, Map<String, String>> providedInputs, QueryScope scope) {
         // 설비 조회 툴 + 도메인 스킬 툴(explain-sensor / trace-reading 등 자동 로드)
         // + (붙여넣은 스냅샷이 있으면) query_snapshot 툴.
         List<AgentTool> tools = new ArrayList<>();
@@ -186,7 +199,10 @@ public class ChatAgent {
 
         // 이미 채워진 입력(skill.key) — 같은 입력 요청은 억제. request_input 도 같은
         // 왕복 종료 규율을 따른다: 제공된 값은 다시 카드로 내보내지 않는다.
+        // 담긴 분석의 조회 키도 이미 채워진 값이다 — 진입 폼에서 사람이 정했으니
+        // 채팅이 그걸 다시 카드로 물으면 같은 값을 두 번 묻는 셈이 된다.
         Set<String> providedInputKeys = providedInputKeys(providedInputs);
+        providedInputKeys.addAll(scopeInputKeys(scope));
         List<InputRequest> inputRequests = new ArrayList<>();
         Set<String> requestedInputKeys = new HashSet<>();
 
@@ -204,6 +220,7 @@ public class ChatAgent {
         // 아니라 맥락임이 역할(role)로 드러난다. 붙여넣은 값 자체는 여기 없다 —
         // 행은 임시 SQLite 로 가고 섹션에는 스키마 카탈로그만 실린다(Design B).
         String note = joinNotes(
+                formatQueryScope(scope),
                 formatFormContext(formContext), formatDataSnapshots(dataSnapshots, snapshotDb),
                 formatProvidedInputs(providedInputs));
         if (note != null) {
@@ -434,6 +451,81 @@ public class ChatAgent {
             }
         }
         return keys;
+    }
+
+    /** 담긴 분석들이 이미 채워 온 (skill,key) — 억제용. */
+    private static Set<String> scopeInputKeys(QueryScope scope) {
+        Set<String> keys = new HashSet<>();
+        if (scope == null || scope.analyses() == null) {
+            return keys;
+        }
+        for (QueryScope.Analysis a : scope.analyses()) {
+            if (a == null || a.skill() == null || a.inputs() == null) {
+                continue;
+            }
+            for (Map.Entry<String, String> kv : a.inputs().entrySet()) {
+                if (kv.getKey() != null && kv.getValue() != null && !kv.getValue().isBlank()) {
+                    keys.add(inputKey(a.skill(), kv.getKey()));
+                }
+            }
+        }
+        return keys;
+    }
+
+    /**
+     * 사용자가 담은 질의 대상을 LLM 이 읽을 한 블록으로 — 이 질문이 무엇을 놓고
+     * 하는 질문인지. 담긴 게 없으면 null(주입 안 함): 스코프는 좁히는 장치이지
+     * 필수 관문이 아니라, 안 담았다고 답을 막지 않는다.
+     *
+     * <p>설비 줄과 분석 줄이 한 목록에 섞이는 건 의도다 — 둘은 성격이 같고 넓이만
+     * 다르다. 분석 줄에는 그 분석의 조회 키를 같이 적는다: 같은 스킬이 두 설비에
+     * 걸렸을 때 어느 값이 어느 쪽 것인지는 그렇게만 구분된다.
+     */
+    static String formatQueryScope(QueryScope scope) {
+        if (scope == null || scope.isEmpty()) {
+            return null;
+        }
+        List<String> lines = new ArrayList<>();
+        lines.add("[질의 대상 — 사용자가 담은 것]");
+        if (scope.equipments() != null) {
+            for (String eq : scope.equipments()) {
+                if (eq != null && !eq.isBlank()) {
+                    lines.add("- 설비 " + eq.trim() + " (전체)");
+                }
+            }
+        }
+        if (scope.analyses() != null) {
+            for (QueryScope.Analysis a : scope.analyses()) {
+                if (a == null || a.equipment() == null || a.equipment().isBlank()) {
+                    continue;
+                }
+                lines.add("- 설비 " + a.equipment().trim() + " · " + scopeAnalysisLabel(a));
+            }
+        }
+        if (lines.size() == 1) {
+            return null;
+        }
+        lines.add("이 질문은 위 대상에 관한 것이다 — 담기지 않은 설비는 답의 근거로 쓰지 말라.");
+        return String.join("\n", lines);
+    }
+
+    /** 분석 줄의 꼬리 — "측정 분포 (fdc_trace_reading; days=30)". */
+    private static String scopeAnalysisLabel(QueryScope.Analysis a) {
+        String focus = a.focus() != null && !a.focus().isBlank() ? a.focus().trim() : a.skill();
+        List<String> detail = new ArrayList<>();
+        if (a.skill() != null && !a.skill().isBlank()) {
+            detail.add(a.skill().trim());
+        }
+        if (a.inputs() != null) {
+            for (Map.Entry<String, String> kv : a.inputs().entrySet()) {
+                if (kv.getKey() != null && kv.getValue() != null && !kv.getValue().isBlank()) {
+                    detail.add(kv.getKey() + "=" + kv.getValue().trim());
+                }
+            }
+        }
+        return detail.isEmpty()
+                ? String.valueOf(focus)
+                : focus + " (" + String.join("; ", detail) + ")";
     }
 
     /**

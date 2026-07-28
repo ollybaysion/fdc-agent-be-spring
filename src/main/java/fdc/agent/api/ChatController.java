@@ -9,6 +9,7 @@ import fdc.agent.config.ApiException;
 import fdc.agent.config.AppProps;
 import fdc.agent.contract.ChatDataSnapshot;
 import fdc.agent.contract.ChatDonePayload;
+import fdc.agent.contract.QueryScope;
 import jakarta.servlet.ServletOutputStream;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -47,13 +48,18 @@ public class ChatController {
      * <p>{@code inputs} 는 사용자가 입력 카드로 채워 되보낸 스칼라 값으로, 스킬로
      * 네임스페이스된다({@code {skill: {key: value}}}). 지금은 한 번에 한 스킬만
      * 진행하지만(단일) 스키마는 멀티-스킬 대비다.
+     *
+     * <p>{@code scope} 는 사용자가 질의 대상 트레이에 담은 것이다 — 이 질문이 어느
+     * 설비·어느 분석을 놓고 하는 질문인지. 없으면 지금까지와 같이 대화 맥락 전체를
+     * 본다.
      */
     public record ChatBody(
             List<HistoryMessage> messages,
             List<FormContext.ContextRow> context,
             FormContext.TimeRange timeRange,
             List<ChatDataSnapshot> dataSnapshots,
-            Map<String, Map<String, String>> inputs) {
+            Map<String, Map<String, String>> inputs,
+            QueryScope scope) {
     }
 
     private final ChatAgent agent;
@@ -100,7 +106,8 @@ public class ChatController {
                     body != null ? body.context() : null,
                     body != null ? body.timeRange() : null),
                     body != null ? body.dataSnapshots() : null,
-                    body != null ? body.inputs() : null);
+                    body != null ? body.inputs() : null,
+                    body != null ? body.scope() : null);
         } catch (Exception err) {
             log.error("chat agent error", err);
             int statusCode = err instanceof ApiException api ? api.status() : 500;
