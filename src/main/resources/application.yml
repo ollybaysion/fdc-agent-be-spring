@@ -30,6 +30,12 @@ fdc:
     base-url: ${LLM_BASE_URL:}
     api-key: ${LLM_API_KEY:}
     model: ${LLM_MODEL:}
+    # 한 호출의 응답 대기 상한(초). 온프렘 GW 가 답을 안 줘도 요청이 풀리게.
+    timeout-seconds: ${LLM_TIMEOUT_SECONDS:60}
+  # 채팅 SSE 타이핑 연출 — 글자 간격과, 그 연출이 응답을 붙드는 총 시간의 상한.
+  chat:
+    token-interval-ms: ${CHAT_TOKEN_INTERVAL_MS:15}
+    max-stream-delay-ms: ${CHAT_MAX_STREAM_DELAY_MS:3000}
   # akg 지식 허브(#8) — URL(+필요시 토큰)만 넣으면 도메인 스킬을 허브에서
   # 런타임 fetch 한다. 비어 있으면 classpath 번들 스킬만 사용(기존 동작).
   akg:

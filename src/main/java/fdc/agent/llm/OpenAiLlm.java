@@ -14,30 +14,56 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * OpenAI 호환 온프렘 GW 어댑터 (LLM_BASE_URL 설정 시). 사내는
  * LLM_BASE_URL/KEY/MODEL 만 채우면 된다. non-stream 으로 한 턴을
  * 받고, 라우트가 토큰 스트리밍을 흉내낸다(단순·견고).
+ *
+ * <p>프로세스 밖으로 나가는 유일한 지점이라 세 가지를 여기서 책임진다:
+ * <b>기다림에 끝이 있고</b>(연결·응답 타임아웃), <b>GW 응답 본문이 클라이언트로
+ * 새지 않고</b>(사유는 로그로, 응답에는 상태만), <b>한 호출이 무엇을 썼는지 남는다</b>
+ * (usage·소요 시간 로그).
  */
 public class OpenAiLlm implements LlmClient {
 
+    private static final Logger log = LoggerFactory.getLogger(OpenAiLlm.class);
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    private final HttpClient http = HttpClient.newHttpClient();
+    /** 연결 자체가 안 서면 오래 붙들 이유가 없다. */
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
+
+    private static final int DEFAULT_TIMEOUT_SECONDS = 60;
+
+    /** 로그에 남길 GW 오류 본문 길이 — 진단엔 충분하고 로그를 덮지는 않는 선. */
+    private static final int LOGGED_BODY_CHARS = 500;
+
+    private final HttpClient http;
     private final String endpoint;
     private final String apiKey;
     private final String model;
+    private final Duration timeout;
 
     public OpenAiLlm(String baseUrl, String apiKey, String model) {
+        this(baseUrl, apiKey, model, DEFAULT_TIMEOUT_SECONDS);
+    }
+
+    public OpenAiLlm(String baseUrl, String apiKey, String model, int timeoutSeconds) {
         this.endpoint = baseUrl.replaceAll("/+$", "") + "/chat/completions";
         this.apiKey = apiKey;
         this.model = model != null && !model.isEmpty() ? model : "default";
+        this.timeout = Duration.ofSeconds(
+                timeoutSeconds > 0 ? timeoutSeconds : DEFAULT_TIMEOUT_SECONDS);
+        this.http = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
     }
 
     @Override
@@ -57,35 +83,45 @@ public class OpenAiLlm implements LlmClient {
         body.put("temperature", 0);
         body.put("stream", false);
 
+        long startedAt = System.nanoTime();
         HttpResponse<String> res;
         try {
             HttpRequest.Builder req = HttpRequest.newBuilder(URI.create(endpoint))
+                    .timeout(timeout)
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(body), StandardCharsets.UTF_8));
             if (apiKey != null && !apiKey.isEmpty()) {
                 req.header("Authorization", "Bearer " + apiKey);
             }
             res = http.send(req.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        } catch (HttpTimeoutException e) {
+            log.error("LLM 응답 {}초 초과 (endpoint={})", timeout.toSeconds(), endpoint);
+            throw new ApiException(504, "error", "LLM 응답 시간이 초과되었습니다.");
         } catch (IOException e) {
-            throw new ApiException(502, "error", "LLM request failed: " + e.getMessage());
+            log.error("LLM 요청 실패 (endpoint={}): {}", endpoint, e.toString());
+            throw new ApiException(502, "error", "LLM 게이트웨이에 연결하지 못했습니다.");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new ApiException(502, "error", "LLM request interrupted");
+            throw new ApiException(502, "error", "LLM 요청이 중단되었습니다.");
         }
 
         if (res.statusCode() < 200 || res.statusCode() >= 300) {
-            String bodyText = res.body() == null ? "" : res.body();
-            throw new ApiException(502, "error",
-                    "LLM " + res.statusCode() + ": " + bodyText.substring(0, Math.min(200, bodyText.length())));
+            // GW 본문은 로그로만 — 무엇이 실릴지는 우리 소관이 아니라서,
+            // 그대로 클라이언트로 되돌리면 그게 곧 반출이 된다.
+            log.error("LLM {} 응답 (endpoint={}): {}", res.statusCode(), endpoint, truncate(res.body()));
+            throw new ApiException(502, "error", "LLM 게이트웨이 오류(HTTP " + res.statusCode() + ").");
         }
 
-        JsonNode msg;
+        JsonNode root;
         try {
-            msg = JSON.readTree(res.body()).path("choices").path(0).path("message");
+            root = JSON.readTree(res.body());
         } catch (IOException e) {
-            throw new ApiException(502, "error", "LLM invalid JSON: " + e.getMessage());
+            log.error("LLM 응답 JSON 파싱 실패 (endpoint={}): {}", endpoint, truncate(res.body()));
+            throw new ApiException(502, "error", "LLM 응답을 해석하지 못했습니다.");
         }
+        logUsage(root, tools.size(), System.nanoTime() - startedAt);
 
+        JsonNode msg = root.path("choices").path(0).path("message");
         JsonNode toolCalls = msg.path("tool_calls");
         if (toolCalls.isArray() && !toolCalls.isEmpty()) {
             List<LlmToolCall> calls = new ArrayList<>();
@@ -101,6 +137,34 @@ public class OpenAiLlm implements LlmClient {
                 ? ""
                 : msg.path("content").asText();
         return new LlmTurn.Final(content);
+    }
+
+    /**
+     * 호출 한 번의 값 — 모델·툴 수·소요 시간·토큰. usage 는 그동안 파싱조차 하지 않고
+     * 버려서, "이 대화가 무엇을 얼마나 썼나"를 서버 로그로 답할 수 없었다.
+     * GW 가 usage 를 안 주면 토큰 자리는 비운다.
+     */
+    private void logUsage(JsonNode root, int toolCount, long elapsedNanos) {
+        long ms = elapsedNanos / 1_000_000;
+        JsonNode usage = root.path("usage");
+        if (usage.isMissingNode() || usage.isNull()) {
+            log.info("llm 호출: model={} tools={} {}ms (usage 없음)", model, toolCount, ms);
+            return;
+        }
+        log.info("llm 호출: model={} tools={} {}ms tokens(prompt/completion/total)={}/{}/{}",
+                model, toolCount, ms,
+                usage.path("prompt_tokens").asInt(-1),
+                usage.path("completion_tokens").asInt(-1),
+                usage.path("total_tokens").asInt(-1));
+    }
+
+    private static String truncate(String body) {
+        if (body == null) {
+            return "";
+        }
+        return body.length() <= LOGGED_BODY_CHARS
+                ? body
+                : body.substring(0, LOGGED_BODY_CHARS) + "…(총 " + body.length() + "자)";
     }
 
     /** LlmMessage → OpenAI wire 형식(assistant.tool_calls / tool.tool_call_id). */

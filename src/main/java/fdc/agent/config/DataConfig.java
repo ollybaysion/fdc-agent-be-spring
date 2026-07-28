@@ -34,7 +34,7 @@ public class DataConfig {
     public LlmClient llmClient(AppProps props) {
         AppProps.Llm llm = props.llm();
         return !props.isRestricted() && llm.isConfigured()
-                ? new OpenAiLlm(llm.baseUrl(), llm.apiKey(), llm.model())
+                ? new OpenAiLlm(llm.baseUrl(), llm.apiKey(), llm.model(), llm.timeoutSeconds())
                 : new MockLlm();
     }
 
