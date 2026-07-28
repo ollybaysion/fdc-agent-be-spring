@@ -197,9 +197,12 @@ public class ChatAgent {
                         m.role() == Role.ASSISTANT ? Role.ASSISTANT : Role.USER,
                         m.content() != null ? m.content() : ""))
                 .toList());
-        // 폼 컨텍스트 + 사용자가 붙여넣은 데이터 스냅샷을 별도 system 메시지가 아니라
-        // 마지막 사용자 메시지에 덧붙인다 — 약한 모델도 요청의 일부로 확실히 반영
-        // (값이 다 있으면 바로 분석, 붙여넣은 데이터가 있으면 그걸 근거로).
+        // 폼 컨텍스트 + 사용자가 붙여넣은 데이터 스냅샷은 질문에 덧붙이지 않고
+        // 마지막 사용자 메시지 **앞의 별도 system 섹션**으로 끼운다(사용자 결정
+        // 2026-07-24 — 질문과 데이터 맥락의 분리). 질문 텍스트가 오염되지 않아
+        // 후속 추천·mock 키워드가 원 질문만 보고, 실 LLM 에도 첨부가 지시가
+        // 아니라 맥락임이 역할(role)로 드러난다. 붙여넣은 값 자체는 여기 없다 —
+        // 행은 임시 SQLite 로 가고 섹션에는 스키마 카탈로그만 실린다(Design B).
         String note = joinNotes(
                 formatFormContext(formContext), formatDataSnapshots(dataSnapshots, snapshotDb),
                 formatProvidedInputs(providedInputs));
@@ -212,9 +215,7 @@ public class ChatAgent {
                 }
             }
             if (lastUser >= 0) {
-                LlmMessage m = hist.get(lastUser);
-                hist.set(lastUser, LlmMessage.of(m.role(),
-                        (m.content() != null ? m.content() : "") + "\n\n" + note));
+                hist.add(lastUser, LlmMessage.of(Role.SYSTEM, note));
             } else {
                 hist.add(LlmMessage.of(Role.USER, note));
             }
