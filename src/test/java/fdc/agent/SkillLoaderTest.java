@@ -88,7 +88,7 @@ class SkillLoaderTest {
         Map<String, Object> props = (Map<String, Object>) tool.parameters().get("properties");
         assertThat(props.keySet()).containsExactly("a", "b");
 
-        tool.execute().run(Map.of("a", "A1", "b", "B2"));
+        tool.run(Map.of("a", "A1", "b", "B2"));
         assertThat(calls.get(0)).isEqualTo(Map.of("x", "A1", "y", "B2"));
     }
 
@@ -126,7 +126,7 @@ class SkillLoaderTest {
         };
 
         AgentTool tool = SkillLoader.loadSkill(SPEC, query);
-        ToolResult res = tool.execute().run(Map.of("snsr_id", "S-0004"));
+        ToolResult res = tool.run(Map.of("snsr_id", "S-0004"));
 
         assertThat(calls).hasSize(3);
         assertThat(calls.get(0).binds()).isEqualTo(Map.of("id", "S-0004")); // 인자 → step0 :id
@@ -166,7 +166,7 @@ class SkillLoaderTest {
             return List.of(); // 항상 0행
         };
         AgentTool tool = SkillLoader.loadSkill(SPEC, query);
-        tool.execute().run(Map.of("snsr_id", "S-9999"));
+        tool.run(Map.of("snsr_id", "S-9999"));
         // step0 만 실행 — step1/2 는 EQP_ID 부재로 query 호출조차 안 함.
         assertThat(calls).hasSize(1);
     }

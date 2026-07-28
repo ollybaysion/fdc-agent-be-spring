@@ -45,7 +45,8 @@ public final class SkillLoader {
                 .map(SkillSpec.SkillInput::name)
                 .toList());
 
-        return new AgentTool(
+        // 스킬은 guidance 를 내지 않는다 — 합성된 description 이 이미 "언제 부르나"다.
+        return AgentTool.of(
                 toolName,
                 synthesizeDescription(spec),
                 parameters,

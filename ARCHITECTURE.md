@@ -54,14 +54,16 @@ fdc-agent-be-spring/
     │   │              # RequestIdFilter · ApiException(Handler)
     │   ├── api/       # ChatController(SSE) · Health
     │   ├── contract/  # 계약 record — ChatTable·ChatDataSnapshot·DataRequest·DonePayload…
-    │   ├── chat/      # ChatAgent(툴 루프) · AgentTool · SnapshotDb
+    │   ├── chat/      # ChatAgent(툴 루프) · ChatPrompt(프롬프트 조립) · AgentTool
+    │   │              # 툴 구현: SnapshotQueryTool · DataRequestTool · InputRequestTool
+    │   │              # SnapshotDb(붙여넣은 표 → 임시 SQLite)
     │   ├── llm/       # LlmClient seam(LlmTypes 내 인터페이스): MockLlm ↔ OpenAiLlm
     │   ├── skills/    # SkillLoader·SkillRegistry — spec.json → 에이전트 툴 컴파일
     │   └── util/Js.java  # JS bit-parity 헬퍼 (해시·반올림·수 표기)
     ├── main/resources/
     │   ├── application.yml            # env 이름 계약 유지 (DATA_SOURCE/ORACLE_*/LLM_*)
     │   └── skills/*.spec.json         # ★ spec v2 (형식 진실원 = agent-knowledge-governance)
-    ├── test/java/fdc/agent/           # JUnit 44
+    ├── test/java/fdc/agent/           # JUnit 64
     ├── scripts/parity.sh              # Node 대조군 잔여 3케이스
     └── docs/phase1-사내-runbook.md    # Oracle 연결 절차 (사내 단계)
 ```
@@ -81,6 +83,30 @@ API 계약의 프로즈 원본은 demo-fe `API.md`+`types.ts`. Spring 판의 형
 툴 인자는 `spec.inputs`, bind 배선은 `steps[].binds` 가 소유한다.
 단 oracle 모드 기준 — fixture 데모에서 새 테이블을 조회하려면
 `SkillRegistry.FIXTURE_SKILL_QUERY` seed 보강이 필요하다.
+
+### BE → LLM 경계 — 누가 무엇을 소유하나
+
+한 요청에서 LLM 에 나가는 것은 세 가지다. **셋의 주인이 각각 다르다.**
+
+| 나가는 것 | 주인 | 규율 |
+| --- | --- | --- |
+| 툴 정의(name·parameters·description) | 각 `AgentTool` | 스킬 툴은 spec 이 컴파일된 결과 |
+| 툴 사용 규칙 | 각 `AgentTool.guidance()` | **붙은 툴의 규칙만** 시스템 프롬프트에 실린다 |
+| 맥락 섹션(질의 대상·폼·첨부·입력) | `ChatPrompt` | 마지막 사용자 메시지 앞의 별도 system 메시지 |
+
+`ChatAgent` 는 이 중 무엇도 적지 않는다 — 툴을 모아 프롬프트를 받고, LLM 이 부른
+이름으로 툴을 찾아 실행하고, 요약을 되먹이는 루프일 뿐이다.
+
+규칙을 툴에 붙여 둔 이유는 **툴이 빠지면 규칙도 같이 빠져야** 하기 때문이다.
+`query_snapshot` 은 붙여넣은 표가 있을 때만 등록되는데, 규칙이 시스템 프롬프트
+상수에 있으면 표가 없는 요청에도 "그 툴로 조회하라"가 남는다. 같은 이유로 맥락
+섹션은 특정 스킬 이름을 적지 않는다 — 스킬 목록은 akg 허브에서 런타임에 온다.
+
+**툴은 두 갈래다.** 조회 툴(스킬 컴파일 결과·`query_snapshot`)은 실제로 데이터를
+가져오고, 수집 툴(`request_data`·`request_input`)은 실행하지 않고 "이게 필요하다"를
+모아 done 페이로드로 내보낸다. 루프는 둘을 구분하지 않는다. 같은 데이터를 무한히
+다시 요청하지 않도록 하는 **억제는 수집 툴이 결정론적으로 확정**한다(모델 판단에
+기대지 않는다). 수집 툴 인스턴스는 요청 단위다.
 
 ### HTTP 표면 · 문서 포인터
 
