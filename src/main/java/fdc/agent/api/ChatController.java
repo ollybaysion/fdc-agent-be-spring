@@ -40,7 +40,7 @@ public class ChatController {
     private static final int MAX_MESSAGES = 100;
     private static final int MAX_MESSAGE_CONTENT_CHARS = 10_000;
 
-    private static final long TOKEN_INTERVAL_MS = 15;
+    // 타이핑 연출 간격·총 지연 상한은 설정이다 — AppProps.Chat 참고.
 
     /**
      * 요청 body(FE 계약 느슨하게 수용 — 알 수 없는 필드는 무시).
@@ -137,13 +137,15 @@ public class ChatController {
 
         ServletOutputStream out = res.getOutputStream();
         try {
-            // code point 단위로 흘린다 (서로게이트 쌍 유지).
+            // code point 단위로 흘린다 (서로게이트 쌍 유지). 간격은 답변 길이에 맞춰
+            // 좁힌다 — 연출 때문에 긴 답변이 길이만큼 늦게 끝나면 안 된다.
             int[] codePoints = result.text().codePoints().toArray();
+            long interval = props.chat().intervalFor(codePoints.length);
             for (int cp : codePoints) {
                 String ch = new String(Character.toChars(cp));
                 write(out, sse("token", Map.of("content", ch)));
                 res.flushBuffer();
-                sleep(TOKEN_INTERVAL_MS);
+                sleep(interval);
             }
             write(out, sse("done", donePayload));
         } catch (Exception err) {
@@ -167,6 +169,9 @@ public class ChatController {
     }
 
     private static void sleep(long ms) {
+        if (ms <= 0) {
+            return;
+        }
         try {
             Thread.sleep(ms);
         } catch (InterruptedException e) {

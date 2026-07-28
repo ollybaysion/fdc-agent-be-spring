@@ -63,7 +63,7 @@ fdc-agent-be-spring/
     ├── main/resources/
     │   ├── application.yml            # env 이름 계약 유지 (DATA_SOURCE/ORACLE_*/LLM_*)
     │   └── skills/*.spec.json         # ★ spec v2 (형식 진실원 = agent-knowledge-governance)
-    ├── test/java/fdc/agent/           # JUnit 64
+    ├── test/java/fdc/agent/           # JUnit 70
     ├── scripts/parity.sh              # Node 대조군 잔여 3케이스
     └── docs/phase1-사내-runbook.md    # Oracle 연결 절차 (사내 단계)
 ```
@@ -135,6 +135,11 @@ ORACLE_POOL_MIN=2 / ORACLE_POOL_MAX=10
 # 온프렘 LLM (OpenAI 호환) — 미설정 시 결정적 mock LLM
 LLM_BASE_URL=http://llm-gw.internal/v1
 LLM_API_KEY=... · LLM_MODEL=...
+LLM_TIMEOUT_SECONDS=60              # 한 호출 응답 대기 상한(연결은 10초 고정)
+# 채팅 타이핑 연출 — 간격, 그리고 연출이 응답을 붙드는 총 시간의 상한
+CHAT_TOKEN_INTERVAL_MS=15 · CHAT_MAX_STREAM_DELAY_MS=3000
+# akg 지식 허브(#8) — 미설정 시 classpath 번들 스킬
+AKG_URL=... · AKG_TOKEN=... · AKG_REFRESH_SECONDS=300
 ```
 
 > `.env` 파일 자동 로드는 양 서버 모두 없음 — shell `export` 나 compose
@@ -208,6 +213,12 @@ Phase 3 이후 모든 신규 작업은 이 레포에서만 진행한다.
   사용자 입력으로 조립하는 경로가 없다.
 - 요청 헤더는 로깅하지 않음(민감 헤더 노출 경로 자체가 없음 — 로깅 확장 시
   마스킹 필수).
+- LLM GW 호출에 **연결 10초 · 응답 `LLM_TIMEOUT_SECONDS`(기본 60초) 상한** —
+  GW 가 답을 안 줘도 요청 스레드가 풀린다(504).
+- **GW 오류 본문은 클라이언트로 안 나간다** — 응답에는 상태 코드만, 본문은
+  서버 로그에만(사내 GW 가 무엇을 실어 보낼지는 우리 소관이 아니다). env 무관.
+- LLM 호출마다 `model·tools·소요 ms·usage(prompt/completion/total)` 를 로그로 —
+  대화 한 건이 무엇을 얼마나 썼는지 서버에서 답할 수 있다.
 
 **API.md 스펙 잔여 (미구현 — 사내 단계 TODO)**:
 
