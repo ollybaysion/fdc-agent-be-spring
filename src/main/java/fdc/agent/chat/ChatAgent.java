@@ -15,9 +15,11 @@ import fdc.agent.llm.LlmTypes.LlmMessage;
 import fdc.agent.llm.LlmTypes.LlmToolCall;
 import fdc.agent.llm.LlmTypes.LlmToolSpec;
 import fdc.agent.llm.LlmTypes.LlmTurn;
+import fdc.agent.skills.QueryPool;
 import fdc.agent.skills.SkillQuery;
 import fdc.agent.skills.SkillRegistry;
 import fdc.agent.skills.SkillSource;
+import fdc.agent.skills.SkillSpec;
 import fdc.agent.util.Trace;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -140,18 +142,29 @@ public class ChatAgent {
             List<HistoryMessage> history, FormContext formContext,
             List<ChatDataSnapshot> dataSnapshots, SnapshotDb snapshotDb,
             Map<String, Map<String, String>> providedInputs, QueryScope scope) {
-        // 이번 요청에 붙는 툴 = 도메인 스킬(자동 로드) + 수집 툴 2종 + (붙여넣은 표가
-        // 있으면) query_snapshot. 시스템 프롬프트의 사용 규칙도 이 목록에서 나오므로,
-        // 안 붙은 툴의 규칙은 애초에 프롬프트에 실리지 않는다.
-        DataRequestTool dataRequests = new DataRequestTool(dataSnapshots);
+        // 이번 요청에 붙는 툴 = 도메인 스킬(자동 로드) + 수집 툴 + (붙여넣은 표가 있으면)
+        // query_snapshot. 시스템 프롬프트의 사용 규칙도 이 목록에서 나오므로, 안 붙은
+        // 툴의 규칙은 애초에 프롬프트에 실리지 않는다.
+        //
+        // 스킬 spec 은 두 번 쓰인다 — 조회 툴로 컴파일되고(실행), 요청 가능한 조회의
+        // 풀이 된다(조달). 같은 목록 위에 두 갈래가 서므로 스킬을 등재하면 양쪽이
+        // 함께 늘고, 등재되지 않은 조회는 어느 쪽으로도 나가지 않는다.
+        List<SkillSpec> skillSpecs = skillSource.specs();
+        QueryPool pool = QueryPool.of(skillSpecs);
+        QueryProgress progress = QueryProgress.of(pool, dataSnapshots);
+
+        // 풀이 비면 request_data 를 아예 붙이지 않는다 — 요청할 수 있는 게 없는데 규칙만
+        // 프롬프트에 남으면, 못 부를 툴을 쓰라고 지시하는 꼴이 된다.
+        DataRequestTool dataRequests = pool.isEmpty() ? null : new DataRequestTool(pool, progress);
         InputRequestTool inputRequests = new InputRequestTool(providedInputs, scope);
 
-        List<AgentTool> tools = new ArrayList<>(
-                SkillRegistry.compile(skillSource.specs(), skillQuery));
+        List<AgentTool> tools = new ArrayList<>(SkillRegistry.compile(skillSpecs, skillQuery));
         if (snapshotDb != null) {
             tools.add(new SnapshotQueryTool(snapshotDb));
         }
-        tools.add(dataRequests);
+        if (dataRequests != null) {
+            tools.add(dataRequests);
+        }
         tools.add(inputRequests);
 
         Map<String, AgentTool> toolByName = new LinkedHashMap<>();
@@ -168,7 +181,8 @@ public class ChatAgent {
         List<LlmMessage> messages = ChatPrompt.messages(
                 ChatPrompt.system(tools),
                 history,
-                ChatPrompt.contextSection(scope, formContext, dataSnapshots, snapshotDb, providedInputs));
+                ChatPrompt.contextSection(
+                        scope, formContext, dataSnapshots, snapshotDb, progress, providedInputs));
 
         List<ChatTable> tables = new ArrayList<>();
 
@@ -179,7 +193,7 @@ public class ChatAgent {
             if (turn instanceof LlmTurn.Final fin) {
                 return new AgentResult(fin.content(), tables, FinishReason.STOP,
                         suggestFollowups(messages, fin.content()),
-                        dataRequests.collected(), inputRequests.collected());
+                        collectedRequests(dataRequests), inputRequests.collected());
             }
 
             List<LlmToolCall> toolCalls = ((LlmTurn.ToolCalls) turn).toolCalls();
@@ -201,6 +215,11 @@ public class ChatAgent {
         // 같은 내부 지시문이 화면에 그대로 나가므로, 모아 둔 표·카드만 들려 보낸다.
         return new AgentResult(OUT_OF_STEPS, tables, FinishReason.LENGTH, List.of(),
                 dataRequests.collected(), inputRequests.collected());
+    }
+
+    /** 조달 요청 — 풀이 비어 툴이 안 붙은 요청에서는 애초에 모일 것이 없다. */
+    private static List<DataRequest> collectedRequests(DataRequestTool tool) {
+        return tool != null ? tool.collected() : List.of();
     }
 
     /**

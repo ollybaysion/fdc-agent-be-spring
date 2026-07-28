@@ -65,7 +65,8 @@ public final class SnapshotDb implements AutoCloseable {
         }
         List<ChatDataSnapshot> rowBearing = new ArrayList<>();
         for (ChatDataSnapshot s : snapshots) {
-            if (s != null && s.rows() != null && !s.rows().isEmpty()) {
+            // 0행으로 확인된 항목도 여기선 담을 게 없다 — 그 사실은 프롬프트가 나른다.
+            if (s != null && s.hasRows()) {
                 rowBearing.add(s);
             }
         }

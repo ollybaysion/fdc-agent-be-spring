@@ -38,10 +38,10 @@ class ChatAgentApiTest {
     }
 
     @Test
-    void 설비_상세_질문은_표가_아니라_dataRequests로_조달을_요청한다() throws Exception {
-        // 전용 설비 조회 툴이 없어진 뒤로 BE 는 설비 정보를 직접 만들지 않는다 —
-        // 실행 가능한 SQL 을 담은 요청 카드를 내보내고, 사용자가 채워 넣는다.
-        MockHttpServletResponse res = chat("ETCH-01 설비 정보 보여줘");
+    void 조달_요청은_등재된_풀에서_골라_실행_가능한_SQL로_나간다() throws Exception {
+        // BE 가 조회할 수 없는 데이터는 요청 카드로 나간다. 카드의 SQL·조회 키·기대 컬럼은
+        // 전부 BE 가 만든다 — 모델은 풀에서 고르고 인자만 채웠다.
+        MockHttpServletResponse res = chat("S-0004 조회 SQL 로 요청해줘");
         assertThat(res.getStatus()).isEqualTo(200);
         String body = res.getContentAsString(StandardCharsets.UTF_8);
 
@@ -52,25 +52,56 @@ class ChatAgentApiTest {
         assertThat(done.has("tables")).isFalse();
 
         JsonNode req = done.path("dataRequests").get(0);
-        assertThat(req.path("queryKey").asText()).isEqualTo("equipment_detail");
-        assertThat(req.path("sql").asText()).contains("fdc_equipment");
+        assertThat(req.path("queryKey").asText()).isEqualTo("fdc-explain-sensor#0__snsr_id=S-0004");
+        assertThat(req.path("sql").asText())
+                .contains("FROM fdc_sensor").contains("snsr_id = 'S-0004'").doesNotContain(":id");
+
+        List<String> cols = new ArrayList<>();
+        req.path("columns").forEach(c -> cols.add(c.asText()));
+        assertThat(cols).contains("SNSR_ID", "EQP_ID");
         assertThat(SseTestSupport.tokenText(body)).contains("데이터 요청을 등록");
     }
 
     @Test
-    void 동종_설비_질문도_dataRequests로_요청된다() throws Exception {
-        MockHttpServletResponse res = chat("ETCH-01 동종 설비 알려줘");
-        String body = res.getContentAsString(StandardCharsets.UTF_8);
-        JsonNode done = SseTestSupport.donePayload(body);
+    void 붙여넣은_결과가_도착하면_다음_단계를_이어_요청한다() throws Exception {
+        // 진행 상태를 어디에도 저장하지 않는다 — 도착한 스냅샷의 조회 키가 곧 "1단계까지
+        // 왔다"이고, 2단계의 바인드(EQP_ID)는 붙여넣은 표에서 읽는다.
+        String body = """
+                {"messages":[{"role":"user","content":"등록 완료"}],
+                 "dataSnapshots":[
+                   {"queryKey":"fdc-explain-sensor#0__snsr_id=S-0004","label":"1단계 — 센서 기본 정보",
+                    "capturedAt":"2026-07-28T00:00","columns":["SNSR_ID","EQP_ID"],"rowCount":1,
+                    "rows":[["S-0004","CVD-01"]]}
+                 ]}
+                """;
+        MockHttpServletResponse res = chatWithBody(body);
+        assertThat(res.getStatus()).isEqualTo(200);
+
+        JsonNode done = SseTestSupport.donePayload(res.getContentAsString(StandardCharsets.UTF_8));
         assertThat(done).isNotNull();
 
         JsonNode req = done.path("dataRequests").get(0);
-        assertThat(req.path("queryKey").asText()).isEqualTo("equipment_peers");
-        assertThat(req.path("label").asText()).isEqualTo("동종 설비 목록");
+        assertThat(req.path("queryKey").asText()).isEqualTo("fdc-explain-sensor#1__snsr_id=S-0004");
+        assertThat(req.path("sql").asText()).contains("eqp_id = 'CVD-01'");
+    }
 
-        List<String> cols = new ArrayList<>();
-        req.path("columns").forEach(c -> cols.add(c.asText()));
-        assertThat(cols).contains("EQP_ID", "MODEL_CD");
+    @Test
+    void 결과_없음으로_등록하면_절차를_더_진행하지_않는다() throws Exception {
+        // 0행은 "아직 안 왔다"가 아니라 "없다"이다 — 다음 단계를 요청하지 않고 끝난다.
+        String body = """
+                {"messages":[{"role":"user","content":"등록 완료"}],
+                 "dataSnapshots":[
+                   {"queryKey":"fdc-explain-sensor#0__snsr_id=S-9999","label":"1단계 — 센서 기본 정보",
+                    "capturedAt":"2026-07-28T00:00","columns":["SNSR_ID","EQP_ID"],"rowCount":0,
+                    "rows":[]}
+                 ]}
+                """;
+        MockHttpServletResponse res = chatWithBody(body);
+        assertThat(res.getStatus()).isEqualTo(200);
+
+        JsonNode done = SseTestSupport.donePayload(res.getContentAsString(StandardCharsets.UTF_8));
+        assertThat(done).isNotNull();
+        assertThat(done.has("dataRequests")).isFalse();
     }
 
     @Test
@@ -113,38 +144,20 @@ class ChatAgentApiTest {
     }
 
     @Test
-    void 조회할_수_없는_데이터는_done에_dataRequests로_요청된다() throws Exception {
-        // 설비/센서 ID 없이 특정 데이터를 요구 → mock LLM 이 request_data 를 호출하고,
-        // 에이전트가 done 페이로드에 요청 카드로 실어 보낸다.
-        MockHttpServletResponse res = chat("센서 목록 알려줘");
-        assertThat(res.getStatus()).isEqualTo(200);
-        String body = res.getContentAsString(StandardCharsets.UTF_8);
-
-        JsonNode done = SseTestSupport.donePayload(body);
-        assertThat(done).isNotNull();
-        assertThat(done.path("dataRequests").isArray()).isTrue();
-
-        JsonNode req = done.path("dataRequests").get(0);
-        assertThat(req.path("queryKey").asText()).isEqualTo("sensor_list");
-        assertThat(req.path("label").asText()).isEqualTo("챔버별 센서 목록");
-        assertThat(req.path("sql").asText()).contains("fdc_sensor_master");
-        List<String> cols = new ArrayList<>();
-        req.path("columns").forEach(c -> cols.add(c.asText()));
-        assertThat(cols).contains("CHAMBER", "SENSOR_ID", "SENSOR_NAME");
-
-        // 사용자에게 조달을 요청하는 안내 문구도 스트림된다.
-        assertThat(SseTestSupport.tokenText(body)).contains("데이터 요청을 등록");
-    }
-
-    @Test
-    void 이미_제공된_데이터는_dataRequests로_다시_요청하지_않는다() throws Exception {
-        // 같은 queryKey(recipe_steps) 스냅샷을 동봉하면, mock 이 request_data 를 불러도
-        // 에이전트가 queryKey 로 억제해 요청 카드를 내보내지 않는다(왕복 종료).
+    void 절차가_끝까지_도착하면_더_요청하지_않는다() throws Exception {
+        // 억제는 모델의 판단이 아니라 도착한 조회 키로 확정된다(왕복 종료).
         String body = """
-                {"messages":[{"role":"user","content":"레시피 STEP 알려줘"}],
+                {"messages":[{"role":"user","content":"등록 완료"}],
                  "dataSnapshots":[
-                   {"queryKey":"recipe_steps","label":"레시피 STEP 구성","capturedAt":"2026-07-22T00:00",
-                    "columns":["STEP_NO","STEP_NAME"],"rowCount":1,"rows":[["1","가열"]]}
+                   {"queryKey":"fdc-explain-sensor#0__snsr_id=S-0004","label":"1단계",
+                    "capturedAt":"2026-07-28T00:00","columns":["SNSR_ID","EQP_ID"],"rowCount":1,
+                    "rows":[["S-0004","CVD-01"]]},
+                   {"queryKey":"fdc-explain-sensor#1__snsr_id=S-0004","label":"2단계",
+                    "capturedAt":"2026-07-28T00:01","columns":["EQP_ID","EQP_NAME"],"rowCount":1,
+                    "rows":[["CVD-01","증착기 1호"]]},
+                   {"queryKey":"fdc-explain-sensor#2__snsr_id=S-0004","label":"3단계",
+                    "capturedAt":"2026-07-28T00:02","columns":["D","EVT_LABEL"],"rowCount":1,
+                    "rows":[["2026-05-11","라인 점검"]]}
                  ]}
                 """;
         MockHttpServletResponse res = chatWithBody(body);
@@ -152,7 +165,7 @@ class ChatAgentApiTest {
 
         JsonNode done = SseTestSupport.donePayload(res.getContentAsString(StandardCharsets.UTF_8));
         assertThat(done).isNotNull();
-        // 이미 제공됐으므로 요청 카드가 나가지 않는다(필드 생략).
+        // 남은 단계가 없으므로 요청 카드가 나가지 않는다(필드 생략).
         assertThat(done.has("dataRequests")).isFalse();
     }
 
