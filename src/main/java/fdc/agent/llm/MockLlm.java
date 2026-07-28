@@ -99,8 +99,12 @@ public class MockLlm implements LlmClient {
 
         // 측정/추적 분석인데 param_index(센서)가 아직 없으면 — 그 값 하나를 입력 카드로
         // 요청한다(request_input). 실 LLM 이 "무슨 값이 없는지" 판단하는 자리를 키워드로
-        // 흉내낸다. 이미 [제공된 입력]에 param_index 가 있으면 재요청하지 않는다.
-        boolean paramProvided = text.contains("[제공된 입력") && text.contains("param_index");
+        // 흉내낸다. 값이 이미 실려 왔으면 재요청하지 않는다: [제공된 입력](채팅이 되물어
+        // 채운 값)뿐 아니라 [질의 대상](담긴 분석이 들고 온 조회 키)도 같이 본다 —
+        // 에이전트는 둘 다 억제하므로, 여기서 한쪽만 보면 목만 헛되이 물어 답이 어색해진다.
+        boolean paramProvided =
+                (text.contains("[제공된 입력") || text.contains("[질의 대상"))
+                        && text.contains("param_index");
         if (matches(beforeInjectedBlocks(text), "측정|추적|trace") && !paramProvided
                 && has(tools, REQUEST_INPUT_TOOL)) {
             LlmToolSpec skill = tools.stream()
