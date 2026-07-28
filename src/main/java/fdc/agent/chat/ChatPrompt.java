@@ -1,6 +1,5 @@
 package fdc.agent.chat;
 
-import fdc.agent.chat.ChatAgent.FormContext;
 import fdc.agent.chat.ChatAgent.HistoryMessage;
 import fdc.agent.contract.ChatDataSnapshot;
 import fdc.agent.contract.QueryScope;
@@ -36,9 +35,6 @@ public final class ChatPrompt {
 
     /** 사용자가 질의 대상 트레이에 담은 설비·분석. */
     public static final String SECTION_SCOPE = "[질의 대상 — 사용자가 담은 것]";
-
-    /** FE 설비 정보 입력 폼(설비·PARAM_INDEX·기간). */
-    public static final String SECTION_FORM = "[분석 대상 — 사용자 폼 입력]";
 
     /** 붙여넣어 첨부된 데이터(스키마 카탈로그 — 행은 임시 DB 로 간다). */
     public static final String SECTION_DATA = "[제공된 데이터 — 사용자 첨부]";
@@ -115,12 +111,11 @@ public final class ChatPrompt {
 
     /** 맥락 섹션들을 빈 줄로 이어 하나의 블록으로. 전부 비면 null(주입 안 함). */
     public static String contextSection(
-            QueryScope scope, FormContext formContext, List<ChatDataSnapshot> snapshots,
+            QueryScope scope, List<ChatDataSnapshot> snapshots,
             SnapshotDb snapshotDb, QueryProgress progress,
             Map<String, Map<String, String>> inputs) {
         return join(
                 queryScope(scope),
-                formContext(formContext),
                 dataSnapshots(snapshots, snapshotDb),
                 progress != null ? progress.promptSection() : null,
                 providedInputs(inputs));
@@ -191,48 +186,6 @@ public final class ChatPrompt {
         return detail.isEmpty()
                 ? String.valueOf(focus)
                 : focus + " (" + String.join("; ", detail) + ")";
-    }
-
-    /**
-     * 폼 입력 요약. 아무것도 없으면 null(주입 안 함). (미입력) 표기를 남겨 LLM 이
-     * 무엇을 되물을지 판단하게 한다.
-     *
-     * <p>값이 다 있으면 바로 분석하라고 밀어 주되 <b>특정 스킬 이름은 적지 않는다</b> —
-     * 스킬 목록은 akg 허브에서 런타임에 오므로(이슈 #8) 이름을 박으면 그 스킬이 없는
-     * 배포에서 없는 툴을 부르라고 지시하는 꼴이 된다.
-     */
-    static String formContext(FormContext fc) {
-        if (fc == null) {
-            return null;
-        }
-        List<FormContext.ContextRow> rows = fc.context() != null ? fc.context() : List.of();
-        List<String> equipments = rows.stream()
-                .map(r -> r.equipment() != null ? r.equipment().trim() : "")
-                .filter(v -> !v.isEmpty())
-                .toList();
-        // 폼의 센서 필드 값은 PARAM_INDEX(센서 파라미터 인덱스)로 취급 — 개발 편의.
-        List<String> paramIndexes = rows.stream()
-                .flatMap(r -> (r.chambers() != null ? r.chambers() : List.<FormContext.Chamber>of()).stream())
-                .flatMap(c -> (c.sensors() != null ? c.sensors() : List.<FormContext.Sensor>of()).stream())
-                .map(s -> s.name() != null ? s.name().trim() : "")
-                .filter(v -> !v.isEmpty())
-                .toList();
-        String start = fc.timeRange() != null && fc.timeRange().start() != null
-                ? fc.timeRange().start().trim() : "";
-        String end = fc.timeRange() != null && fc.timeRange().end() != null
-                ? fc.timeRange().end().trim() : "";
-
-        if (equipments.isEmpty() && paramIndexes.isEmpty() && start.isEmpty() && end.isEmpty()) {
-            return null;
-        }
-        return String.join("\n",
-                SECTION_FORM,
-                "- 설비: " + (equipments.isEmpty() ? "(미입력)" : String.join(", ", equipments)),
-                "- PARAM_INDEX: " + (paramIndexes.isEmpty() ? "(미입력)" : String.join(", ", paramIndexes)),
-                "- 기간: " + (start.isEmpty() ? "(미입력)" : start) + " ~ " + (end.isEmpty() ? "(미입력)" : end),
-                "설비·PARAM_INDEX·기간이 모두 있으면 되묻지 말고 이 값들로 바로 측정 조회 툴을 호출하라"
-                        + "(PARAM_INDEX 는 센서 ID 가 아니라 param_index 인자로 그대로 넘긴다).",
-                "(미입력)이 있을 때만 무엇을 더 입력해야 하는지 되물어라.");
     }
 
     /**

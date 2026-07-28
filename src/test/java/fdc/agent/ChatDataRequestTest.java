@@ -51,7 +51,7 @@ class ChatDataRequestTest {
 
     private static AgentResult run(Map<String, Object> toolArgs, List<ChatDataSnapshot> snapshots) {
         return new ChatAgent(calls(toolArgs), SkillRegistry.FIXTURE_SKILL_QUERY)
-                .run(List.of(new HistoryMessage(Role.USER, "조달 요청해줘")), null, snapshots);
+                .run(List.of(new HistoryMessage(Role.USER, "조달 요청해줘")), snapshots);
     }
 
     private static ChatDataSnapshot arrived(String key, List<String> cols, List<List<String>> rows) {
@@ -222,7 +222,7 @@ class ChatDataRequestTest {
             return new LlmTurn.Final("ok");
         };
         new ChatAgent(capture, SkillRegistry.FIXTURE_SKILL_QUERY).run(
-                List.of(new HistoryMessage(Role.USER, "등록 완료")), null,
+                List.of(new HistoryMessage(Role.USER, "등록 완료")),
                 List.of(arrived(SENSOR_KEY_0, List.of("SNSR_ID", "EQP_ID"),
                         List.of(List.of("S-0004", "CVD-01")))));
 

@@ -102,7 +102,7 @@ class ChatInputRequestTest {
                 "fdc_trace_reading", Map.of("param_index", "7"));
 
         AgentResult result = agent(llm).run(
-                List.of(new HistoryMessage(Role.USER, "CVD-01 측정 분석해줘")), null, null, inputs);
+                List.of(new HistoryMessage(Role.USER, "CVD-01 측정 분석해줘")), null, inputs);
 
         // 제공된 값이 프롬프트(마지막 user 메시지)에 주입된다.
         assertThat(llm.seen.get(0)).contains("제공된 입력").contains("param_index").contains("7");

@@ -73,7 +73,7 @@ demo-fe 쪽은 `BACKEND_URL=http://<host>:8080` — **오리진만**, `/api/fdc/
 
 | 블록 | 무엇을 보여주나 |
 | --- | --- |
-| `FE→BE 요청` | 받은 본문 전량 — messages·context·timeRange·scope·inputs·dataSnapshots(행은 앞 20개) |
+| `FE→BE 요청` | 받은 본문 전량 — messages·scope·inputs·dataSnapshots(행은 앞 20개) |
 | `BE→LLM 툴 노출 (N개)` | 이번 요청에서 LLM 이 실제로 보는 툴 전량(이름·설명·파라미터 스키마) |
 | `BE→LLM step N 메시지` | 그 스텝에 보낸 메시지 배열(시스템 프롬프트·맥락 섹션·툴 결과 포함) |
 | `BE→LLM HTTP POST` | 전선에 나가는 JSON 원문(`tools[].function` 포함, 인증 헤더는 제외) |

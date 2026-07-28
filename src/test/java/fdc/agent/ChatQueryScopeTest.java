@@ -54,8 +54,7 @@ class ChatQueryScopeTest {
     @Test
     void 담긴_설비가_프롬프트에_나간다() {
         CaptureLlm llm = new CaptureLlm(List.of(new LlmTurn.Final("ok")));
-        agent(llm).run(ask(), null, null, null,
-                new QueryScope(List.of("CVD-01"), null));
+        agent(llm).run(ask(), null, null, new QueryScope(List.of("CVD-01"), null));
 
         assertThat(llm.seen.get(0)).contains("[질의 대상").contains("설비 CVD-01 (전체)");
     }
@@ -65,7 +64,7 @@ class ChatQueryScopeTest {
         // 같은 스킬이 두 설비에 걸릴 수 있으니, 어느 값이 어느 쪽 것인지는
         // 분석 줄에 붙는 조회 키로만 구분된다.
         CaptureLlm llm = new CaptureLlm(List.of(new LlmTurn.Final("ok")));
-        agent(llm).run(ask(), null, null, null, new QueryScope(
+        agent(llm).run(ask(), null, null, new QueryScope(
                 List.of("CVD-01"),
                 List.of(new QueryScope.Analysis(
                         "a1", "CVD-02", "fdc_trace_reading", "측정 분포",
@@ -80,7 +79,7 @@ class ChatQueryScopeTest {
     void 담긴_게_없으면_섹션을_안_넣는다() {
         // 스코프는 좁히는 장치이지 관문이 아니다 — 안 담았다고 답을 막지 않는다.
         CaptureLlm llm = new CaptureLlm(List.of(new LlmTurn.Final("ok")));
-        agent(llm).run(ask(), null, null, null, new QueryScope(List.of(), List.of()));
+        agent(llm).run(ask(), null, null, new QueryScope(List.of(), List.of()));
 
         assertThat(llm.seen.get(0)).doesNotContain("[질의 대상");
     }
@@ -93,7 +92,7 @@ class ChatQueryScopeTest {
                         "skill", "fdc_trace_reading", "key", "days", "label", "DAYS")))),
                 new LlmTurn.Final("분석을 이어갑니다.")));
 
-        AgentResult result = agent(llm).run(ask(), null, null, null, new QueryScope(
+        AgentResult result = agent(llm).run(ask(), null, null, new QueryScope(
                 null,
                 List.of(new QueryScope.Analysis(
                         "a1", "CVD-01", "fdc_trace_reading", "측정 분포",

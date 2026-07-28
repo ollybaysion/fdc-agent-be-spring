@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import fdc.agent.chat.ChatAgent;
 import fdc.agent.chat.ChatAgent.AgentResult;
-import fdc.agent.chat.ChatAgent.FormContext;
 import fdc.agent.chat.ChatAgent.HistoryMessage;
 import fdc.agent.contract.ChatDataSnapshot;
 import fdc.agent.contract.FinishReason;
@@ -71,7 +70,7 @@ class ChatPromptTest {
     @Test
     void 붙여넣은_표가_있으면_query_snapshot_규칙이_함께_붙는다() {
         CaptureSystem llm = new CaptureSystem(new LlmTurn.Final("ok"));
-        agent(llm).run(ask("안녕하세요"), null, List.of(pinned()));
+        agent(llm).run(ask("안녕하세요"), List.of(pinned()));
 
         assertThat(llm.systems.get(0)).contains("[도구 사용 규칙]").contains("query_snapshot");
     }
@@ -84,22 +83,6 @@ class ChatPromptTest {
         agent(llm).run(ask("안녕하세요"), null);
 
         assertThat(llm.systems.get(0)).contains("request_data").contains("request_input");
-    }
-
-    @Test
-    void 폼_섹션은_특정_스킬_이름을_박지_않는다() {
-        // 스킬 목록은 akg 허브에서 런타임에 온다(#8) — 이름을 박으면 그 스킬이 없는
-        // 배포에서 없는 툴을 부르라고 지시하게 된다.
-        FormContext form = new FormContext(
-                List.of(new FormContext.ContextRow("ETCH-01",
-                        List.of(new FormContext.Chamber(List.of(new FormContext.Sensor("5")))))),
-                new FormContext.TimeRange("2026-05-01", "2026-05-07"));
-        CaptureSystem llm = new CaptureSystem(new LlmTurn.Final("ok"));
-        agent(llm).run(ask("분석해줘"), form);
-
-        String prompt = llm.systems.get(0);
-        assertThat(prompt).contains("분석 대상").contains("PARAM_INDEX: 5");
-        assertThat(prompt).doesNotContain("fdc_trace_reading");
     }
 
     @Test

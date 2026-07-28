@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import fdc.agent.chat.ChatAgent;
 import fdc.agent.chat.ChatAgent.AgentResult;
-import fdc.agent.chat.ChatAgent.FormContext;
 import fdc.agent.chat.ChatAgent.HistoryMessage;
 import fdc.agent.contract.Role;
 import fdc.agent.llm.LlmTypes.LlmClient;
@@ -17,7 +16,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
-/** 폼 컨텍스트 주입(PARAM_INDEX)과 fdc_trace_reading 호출 경로. */
+/** fdc_trace_reading 호출 경로 — 툴이 부르면 그 표가 결과에 실리는가. */
 class AnalysisTest {
 
     /** 받은 messages 를 포착하고, 지정 turn 을 순서대로 반환하는 가짜 LLM. */
@@ -40,34 +39,9 @@ class AnalysisTest {
         }
     }
 
-    private static AgentResult run(LlmClient llm, String content, FormContext formContext) {
+    private static AgentResult run(LlmClient llm, String content) {
         ChatAgent agent = new ChatAgent(llm, SkillRegistry.FIXTURE_SKILL_QUERY);
-        return agent.run(List.of(new HistoryMessage(Role.USER, content)), formContext);
-    }
-
-    @Test
-    void 폼_설비_PARAM_INDEX_기간을_프롬프트에_주입한다() {
-        FormContext formContext = new FormContext(
-                List.of(new FormContext.ContextRow("ETCH-01",
-                        List.of(new FormContext.Chamber(List.of(new FormContext.Sensor("5")))))),
-                new FormContext.TimeRange("2026-05-01", "2026-05-07"));
-        CaptureLlm llm = new CaptureLlm(List.of(new LlmTurn.Final("ok")));
-        run(llm, "분석해줘", formContext);
-
-        String prompt = llm.seen.get(0);
-        assertThat(prompt).contains("분석 대상");
-        assertThat(prompt).contains("ETCH-01");
-        assertThat(prompt).contains("PARAM_INDEX: 5");
-        assertThat(prompt).contains("2026-05-01");
-    }
-
-    @Test
-    void 빠진_항목은_미입력으로_표시한다() {
-        FormContext formContext = new FormContext(
-                List.of(new FormContext.ContextRow("ETCH-01", null)), null);
-        CaptureLlm llm = new CaptureLlm(List.of(new LlmTurn.Final("ok")));
-        run(llm, "분석", formContext);
-        assertThat(llm.seen.get(0)).contains("PARAM_INDEX: (미입력)");
+        return agent.run(List.of(new HistoryMessage(Role.USER, content)));
     }
 
     @Test
@@ -79,7 +53,7 @@ class AnalysisTest {
                         "start", "2026-05-01",
                         "end", "2026-05-07")))),
                 new LlmTurn.Final("분석 결과입니다.")));
-        AgentResult result = run(llm, "분석", null);
+        AgentResult result = run(llm, "분석");
         assertThat(result.tables().stream()
                 .anyMatch(t -> t.title() != null && t.title().contains("구간 측정 집계"))).isTrue();
     }

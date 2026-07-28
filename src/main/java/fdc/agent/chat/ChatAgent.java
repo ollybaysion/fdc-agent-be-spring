@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import fdc.agent.chat.AgentTool.ToolResult;
 import fdc.agent.contract.ChatDataSnapshot;
+import fdc.agent.contract.ChatImage;
+import fdc.agent.contract.ChatLink;
 import fdc.agent.contract.ChatTable;
 import fdc.agent.contract.DataRequest;
 import fdc.agent.contract.FinishReason;
@@ -56,21 +58,6 @@ public class ChatAgent {
     public record HistoryMessage(Role role, String content) {
     }
 
-    /** FE 폼 입력(설비 정보 + 시간 범위). 계약 느슨하게 — BE 는 요약만 한다. */
-    public record FormContext(List<ContextRow> context, TimeRange timeRange) {
-        public record ContextRow(String equipment, List<Chamber> chambers) {
-        }
-
-        public record Chamber(List<Sensor> sensors) {
-        }
-
-        public record Sensor(String name) {
-        }
-
-        public record TimeRange(String start, String end) {
-        }
-    }
-
     /**
      * finishReason: "stop" | "length". recommendQuestion 은 실패/미지원 시 빈 배열.
      * dataRequests 는 이 응답에서 조달을 요청한 데이터(없으면 빈 배열).
@@ -79,7 +66,16 @@ public class ChatAgent {
     public record AgentResult(
             String text, List<ChatTable> tables, FinishReason finishReason,
             List<String> recommendQuestion, List<DataRequest> dataRequests,
-            List<InputRequest> inputRequests) {
+            List<InputRequest> inputRequests, List<ChatImage> images, List<ChatLink> links) {
+
+        /** 그림·링크를 내놓는 툴이 아직 없는 경로용 — 나머지는 그대로. */
+        public AgentResult(
+                String text, List<ChatTable> tables, FinishReason finishReason,
+                List<String> recommendQuestion, List<DataRequest> dataRequests,
+                List<InputRequest> inputRequests) {
+            this(text, tables, finishReason, recommendQuestion, dataRequests,
+                    inputRequests, List.of(), List.of());
+        }
     }
 
     private final LlmClient llm;
@@ -97,13 +93,12 @@ public class ChatAgent {
         this.skillSource = skillSource;
     }
 
-    public AgentResult run(List<HistoryMessage> history, FormContext formContext) {
-        return run(history, formContext, null, null);
+    public AgentResult run(List<HistoryMessage> history) {
+        return run(history, null, null);
     }
 
-    public AgentResult run(
-            List<HistoryMessage> history, FormContext formContext, List<ChatDataSnapshot> dataSnapshots) {
-        return run(history, formContext, dataSnapshots, null);
+    public AgentResult run(List<HistoryMessage> history, List<ChatDataSnapshot> dataSnapshots) {
+        return run(history, dataSnapshots, null);
     }
 
     /**
@@ -112,9 +107,9 @@ public class ChatAgent {
      *     {@code request_input} 재요청이 억제된다(왕복 종료 보장). 없으면 null.
      */
     public AgentResult run(
-            List<HistoryMessage> history, FormContext formContext,
-            List<ChatDataSnapshot> dataSnapshots, Map<String, Map<String, String>> inputs) {
-        return run(history, formContext, dataSnapshots, inputs, null);
+            List<HistoryMessage> history, List<ChatDataSnapshot> dataSnapshots,
+            Map<String, Map<String, String>> inputs) {
+        return run(history, dataSnapshots, inputs, null);
     }
 
     /**
@@ -123,14 +118,13 @@ public class ChatAgent {
      *     {@code request_input} 재요청이 억제된다. 담긴 게 없으면 null.
      */
     public AgentResult run(
-            List<HistoryMessage> history, FormContext formContext,
-            List<ChatDataSnapshot> dataSnapshots, Map<String, Map<String, String>> inputs,
-            QueryScope scope) {
+            List<HistoryMessage> history, List<ChatDataSnapshot> dataSnapshots,
+            Map<String, Map<String, String>> inputs, QueryScope scope) {
         // 붙여넣은 스냅샷(행 있음) → 요청 단위 인메모리 SQLite(Design B). 없으면 null.
         // 요청이 끝나면 연결을 닫는다(finally) — 여러 반환점을 감싸려 루프를 분리한다.
         SnapshotDb snapshotDb = SnapshotDb.build(dataSnapshots);
         try {
-            return runLoop(history, formContext, dataSnapshots, snapshotDb, inputs, scope);
+            return runLoop(history, dataSnapshots, snapshotDb, inputs, scope);
         } finally {
             if (snapshotDb != null) {
                 snapshotDb.close();
@@ -139,7 +133,7 @@ public class ChatAgent {
     }
 
     private AgentResult runLoop(
-            List<HistoryMessage> history, FormContext formContext,
+            List<HistoryMessage> history,
             List<ChatDataSnapshot> dataSnapshots, SnapshotDb snapshotDb,
             Map<String, Map<String, String>> providedInputs, QueryScope scope) {
         // 이번 요청에 붙는 툴 = 도메인 스킬(자동 로드) + 수집 툴 + (붙여넣은 표가 있으면)
@@ -182,7 +176,7 @@ public class ChatAgent {
                 ChatPrompt.system(tools),
                 history,
                 ChatPrompt.contextSection(
-                        scope, formContext, dataSnapshots, snapshotDb, progress, providedInputs));
+                        scope, dataSnapshots, snapshotDb, progress, providedInputs));
 
         List<ChatTable> tables = new ArrayList<>();
 
