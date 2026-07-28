@@ -7,7 +7,6 @@ import fdc.agent.chat.ChatAgent.AgentResult;
 import fdc.agent.chat.ChatAgent.HistoryMessage;
 import fdc.agent.contract.ChatDataSnapshot;
 import fdc.agent.contract.Role;
-import fdc.agent.data.fixtures.FixtureRepo;
 import fdc.agent.llm.LlmTypes.LlmClient;
 import fdc.agent.llm.LlmTypes.LlmMessage;
 import fdc.agent.llm.LlmTypes.LlmToolCall;
@@ -50,7 +49,7 @@ class ChatSnapshotTest {
     }
 
     private static ChatAgent agent(LlmClient llm) {
-        return new ChatAgent(llm, new FixtureRepo(), SkillRegistry.FIXTURE_SKILL_QUERY);
+        return new ChatAgent(llm, SkillRegistry.FIXTURE_SKILL_QUERY);
     }
 
     private static ChatDataSnapshot rowsSnap() {

@@ -38,45 +38,39 @@ class ChatAgentApiTest {
     }
 
     @Test
-    void 설비_ID_질문은_설비_상세_툴을_호출하고_done에_표를_동봉한다() throws Exception {
+    void 설비_상세_질문은_표가_아니라_dataRequests로_조달을_요청한다() throws Exception {
+        // 전용 설비 조회 툴이 없어진 뒤로 BE 는 설비 정보를 직접 만들지 않는다 —
+        // 실행 가능한 SQL 을 담은 요청 카드를 내보내고, 사용자가 채워 넣는다.
         MockHttpServletResponse res = chat("ETCH-01 설비 정보 보여줘");
         assertThat(res.getStatus()).isEqualTo(200);
         String body = res.getContentAsString(StandardCharsets.UTF_8);
 
-        assertThat(SseTestSupport.tokenText(body)).contains("ETCH-01");
-
         JsonNode done = SseTestSupport.donePayload(body);
         assertThat(done).isNotNull();
         assertThat(done.path("finishReason").asText()).isEqualTo("stop");
-        assertThat(done.path("tables").isArray()).isTrue();
+        // 조회한 게 없으니 표는 실리지 않는다.
+        assertThat(done.has("tables")).isFalse();
 
-        List<String> titles = new ArrayList<>();
-        done.path("tables").forEach(t -> titles.add(t.path("title").asText()));
-        assertThat(titles).containsExactly("설비 정보", "챔버 정보", "센서 정보");
-
-        JsonNode equip = done.path("tables").get(0);
-        assertThat(equip.path("columns").get(0).asText()).isEqualTo("ID");
-        assertThat(equip.path("rows").get(0).path("ID").asText()).isEqualTo("ETCH-01");
+        JsonNode req = done.path("dataRequests").get(0);
+        assertThat(req.path("queryKey").asText()).isEqualTo("equipment_detail");
+        assertThat(req.path("sql").asText()).contains("fdc_equipment");
+        assertThat(SseTestSupport.tokenText(body)).contains("데이터 요청을 등록");
     }
 
     @Test
-    void 동종_설비_질문은_peers_툴을_호출하고_표에_ETCH_02가_포함된다() throws Exception {
+    void 동종_설비_질문도_dataRequests로_요청된다() throws Exception {
         MockHttpServletResponse res = chat("ETCH-01 동종 설비 알려줘");
         String body = res.getContentAsString(StandardCharsets.UTF_8);
         JsonNode done = SseTestSupport.donePayload(body);
         assertThat(done).isNotNull();
 
-        JsonNode peers = null;
-        for (JsonNode t : done.path("tables")) {
-            if ("동종 설비".equals(t.path("title").asText())) {
-                peers = t;
-            }
-        }
-        assertThat(peers).isNotNull();
-        List<String> ids = new ArrayList<>();
-        peers.path("rows").forEach(r -> ids.add(r.path("ID").asText()));
-        assertThat(ids).contains("ETCH-02");
-        assertThat(ids).doesNotContain("ETCH-01");
+        JsonNode req = done.path("dataRequests").get(0);
+        assertThat(req.path("queryKey").asText()).isEqualTo("equipment_peers");
+        assertThat(req.path("label").asText()).isEqualTo("동종 설비 목록");
+
+        List<String> cols = new ArrayList<>();
+        req.path("columns").forEach(c -> cols.add(c.asText()));
+        assertThat(cols).contains("EQP_ID", "MODEL_CD");
     }
 
     @Test

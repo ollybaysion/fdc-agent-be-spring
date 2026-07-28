@@ -18,8 +18,6 @@ import java.util.regex.Pattern;
  */
 public class MockLlm implements LlmClient {
 
-    // 설비 ID 패턴 (예: ETCH-01, CVD-02). 대문자 2~4 + "-" + 숫자 2+.
-    private static final Pattern ID_RE = Pattern.compile("\\b([A-Z]{2,4}-\\d{2,})\\b");
     // 센서 ID 패턴 (예: S-0004). 도메인 스킬(snsr_id 파라미터) 호출용.
     private static final Pattern SENSOR_RE = Pattern.compile("\\bS-\\d{3,}\\b");
     private static final String REQUEST_DATA_TOOL = "request_data";
@@ -120,21 +118,6 @@ public class MockLlm implements LlmClient {
             }
         }
 
-        Matcher idMatch = ID_RE.matcher(text);
-        if (idMatch.find()) {
-            String id = idMatch.group(1);
-            if (matches(text, "동종|피어|비슷|같은\\s*모델|peer") && has(tools, "get_peers")) {
-                return new LlmToolCall("call_1", "get_peers", Map.of("id", id));
-            }
-            if (matches(text, "셋업|set\\s*up|정비|이벤트|이력|maintenance") && has(tools, "get_setup_events")) {
-                return new LlmToolCall("call_1", "get_setup_events", Map.of("id", id));
-            }
-            if (has(tools, "get_equipment_detail")) {
-                return new LlmToolCall("call_1", "get_equipment_detail", Map.of("id", id));
-            }
-            return null;
-        }
-
         // 붙여넣어 임시 DB로 적재된 표가 있고 원 질문이 조회를 요청하면 — query_snapshot.
         // (억제와 마찬가지로 주입 블록은 빼고 원 질문만 본다.) 스키마 카탈로그의 첫
         // 백틱 테이블명을 골라 SELECT * 로 조회한다 — 실 LLM 이 SQL 을 짜는 자리를 흉내.
@@ -173,7 +156,8 @@ public class MockLlm implements LlmClient {
             String queryKey, String label, String sql, List<String> columns, List<String> triggers) {
     }
 
-    // DB 없이 조달을 요청할 만한 데이터.
+    // DB 없이 조달을 요청할 만한 데이터. 설비 계열도 여기에 있다 — 전용 조회 툴을
+    // 걷어낸 뒤로 설비·동종·셋업 이력도 "요청 → 붙여넣기"로만 들어온다.
     private static final List<DataNeed> REQUESTABLE = List.of(
             new DataNeed("sensor_list", "챔버별 센서 목록",
                     "SELECT chamber, sensor_id, sensor_name\n  FROM fdc_sensor_master\n"
@@ -184,7 +168,24 @@ public class MockLlm implements LlmClient {
                     "SELECT recipe_id, step_no, step_name, duration_sec\n  FROM fdc_recipe_step\n"
                             + " WHERE recipe_id = :recipe_id\n ORDER BY step_no",
                     List.of("RECIPE_ID", "STEP_NO", "STEP_NAME", "DURATION_SEC"),
-                    List.of("레시피")));
+                    List.of("레시피")),
+            new DataNeed("equipment_peers", "동종 설비 목록",
+                    "SELECT eqp_id, eqp_name, model_cd\n  FROM fdc_equipment\n"
+                            + " WHERE model_cd = (SELECT model_cd FROM fdc_equipment"
+                            + " WHERE eqp_id = :equipment_id)\n   AND eqp_id <> :equipment_id\n"
+                            + " ORDER BY eqp_id",
+                    List.of("EQP_ID", "EQP_NAME", "MODEL_CD"),
+                    List.of("동종", "피어")),
+            new DataNeed("setup_events", "설비 셋업·정비 이력",
+                    "SELECT evt_dt, evt_type_cd, evt_label\n  FROM fdc_setup_event\n"
+                            + " WHERE eqp_id = :equipment_id\n ORDER BY evt_dt DESC",
+                    List.of("EVT_DT", "EVT_TYPE_CD", "EVT_LABEL"),
+                    List.of("셋업", "정비 이력")),
+            new DataNeed("equipment_detail", "설비 기본 정보",
+                    "SELECT eqp_id, eqp_name, model_cd, vendor, use_yn\n  FROM fdc_equipment\n"
+                            + " WHERE eqp_id = :equipment_id",
+                    List.of("EQP_ID", "EQP_NAME", "MODEL_CD", "VENDOR", "USE_YN"),
+                    List.of("설비 정보", "설비 상세", "상세 정보")));
 
     private static DataNeed matchDataNeed(String question) {
         String q = question.toLowerCase();
@@ -214,8 +215,8 @@ public class MockLlm implements LlmClient {
 
     /**
      * 원 질문(이 3-메시지 맥락의 첫 user)의 키워드로 다음 걸음을 고른다 —
-     * 데이터 요청 왕복(sensor_list ↔ recipe_steps)이 추천 클릭만으로 이어지고,
-     * 나머지는 설비 ID 조회 계열로 빠져나가게.
+     * 데이터 요청 왕복(sensor_list ↔ recipe_steps ↔ 설비 계열)이 추천 클릭만으로
+     * 이어지게.
      */
     private static String followupSuggestions(List<LlmMessage> messages) {
         String original = messages.isEmpty() || messages.get(0).content() == null
@@ -233,7 +234,8 @@ public class MockLlm implements LlmClient {
     private static String genericAnswer(String text) {
         String q = text.trim();
         return (q.isEmpty() ? "" : "'" + q + "' 질문 주셨네요. ")
-                + "설비 ID(예: ETCH-01)를 알려주시면 설비·챔버·센서 상세를 조회해 드립니다. "
+                + "설비 ID(예: ETCH-01)나 센서 ID(예: S-0004)와 무엇을 보고 싶은지 알려주시면, "
+                + "필요한 데이터를 조회 SQL 과 함께 요청해 드립니다. "
                 + "(fdc-agent-be Phase 2 — 온프렘 LLM 미설정 시 mock 응답)";
     }
 }

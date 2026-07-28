@@ -10,7 +10,6 @@ import fdc.agent.chat.ChatAgent.AgentResult;
 import fdc.agent.chat.ChatAgent.HistoryMessage;
 import fdc.agent.contract.FinishReason;
 import fdc.agent.contract.Role;
-import fdc.agent.data.fixtures.FixtureRepo;
 import fdc.agent.llm.LlmTypes.LlmMessage;
 import fdc.agent.llm.LlmTypes.LlmToolCall;
 import fdc.agent.llm.LlmTypes.LlmToolSpec;
@@ -58,12 +57,12 @@ class OpenAiLlmTest {
             String response = hasToolResult
                     ? """
                     {"choices":[{"message":{"role":"assistant",
-                      "content":"설비 ETCH-01 상세를 확인했습니다. 챔버·센서 값은 표를 참고하세요."}}]}
+                      "content":"센서 S-0004 를 확인했습니다. 소속 설비·최근 이벤트는 표를 참고하세요."}}]}
                     """
                     : """
                     {"choices":[{"message":{"role":"assistant","content":null,
                       "tool_calls":[{"id":"call_x1","type":"function",
-                        "function":{"name":"get_equipment_detail","arguments":"{\\"id\\":\\"ETCH-01\\"}"}}]}}]}
+                        "function":{"name":"fdc_explain_sensor","arguments":"{\\"snsr_id\\":\\"S-0004\\"}"}}]}}]}
                     """;
             byte[] bytes = response.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "application/json");
@@ -87,24 +86,24 @@ class OpenAiLlmTest {
         }
     }
 
-    private static LlmToolSpec detailToolSpec() {
-        return new LlmToolSpec("get_equipment_detail", "설비 상세", Map.of(
+    private static LlmToolSpec explainSensorSpec() {
+        return new LlmToolSpec("fdc_explain_sensor", "센서 설명", Map.of(
                 "type", "object",
-                "properties", Map.of("id", Map.of("type", "string")),
-                "required", List.of("id")));
+                "properties", Map.of("snsr_id", Map.of("type", "string")),
+                "required", List.of("snsr_id")));
     }
 
     @Test
     void 요청을_OpenAI_형식으로_보내고_tool_calls_응답을_파싱한다() {
         OpenAiLlm llm = new OpenAiLlm(baseUrl, "test-key", "onprem-x");
         LlmTurn turn = llm.next(
-                List.of(LlmMessage.of(Role.USER, "ETCH-01 설비 정보")),
-                List.of(detailToolSpec()));
+                List.of(LlmMessage.of(Role.USER, "S-0004 센서 설명")),
+                List.of(explainSensorSpec()));
 
         assertThat(turn).isInstanceOf(LlmTurn.ToolCalls.class);
         LlmTurn.ToolCalls calls = (LlmTurn.ToolCalls) turn;
-        assertThat(calls.toolCalls().get(0).name()).isEqualTo("get_equipment_detail");
-        assertThat(calls.toolCalls().get(0).arguments()).isEqualTo(Map.of("id", "ETCH-01"));
+        assertThat(calls.toolCalls().get(0).name()).isEqualTo("fdc_explain_sensor");
+        assertThat(calls.toolCalls().get(0).arguments()).isEqualTo(Map.of("snsr_id", "S-0004"));
 
         // 나간 요청이 OpenAI 형식인지(model/tool_choice/tools[].function).
         JsonNode sent = lastSent();
@@ -112,20 +111,20 @@ class OpenAiLlmTest {
         assertThat(sent.path("tool_choice").asText()).isEqualTo("auto");
         assertThat(sent.path("tools").get(0).path("type").asText()).isEqualTo("function");
         assertThat(sent.path("tools").get(0).path("function").path("name").asText())
-                .isEqualTo("get_equipment_detail");
+                .isEqualTo("fdc_explain_sensor");
     }
 
     @Test
     void tool_결과가_포함된_대화엔_최종_content를_돌려준다() {
         OpenAiLlm llm = new OpenAiLlm(baseUrl, "test-key", "onprem-x");
         LlmTurn turn = llm.next(List.of(
-                LlmMessage.of(Role.USER, "ETCH-01 설비 정보"),
+                LlmMessage.of(Role.USER, "S-0004 센서 설명"),
                 LlmMessage.assistantToolCalls(List.of(
-                        new LlmToolCall("call_x1", "get_equipment_detail", Map.of("id", "ETCH-01")))),
-                LlmMessage.toolResult("call_x1", "get_equipment_detail", "설비 ETCH-01 요약")),
+                        new LlmToolCall("call_x1", "fdc_explain_sensor", Map.of("snsr_id", "S-0004")))),
+                LlmMessage.toolResult("call_x1", "fdc_explain_sensor", "센서 S-0004 요약")),
                 List.of());
         assertThat(turn).isInstanceOf(LlmTurn.Final.class);
-        assertThat(((LlmTurn.Final) turn).content()).contains("ETCH-01");
+        assertThat(((LlmTurn.Final) turn).content()).contains("S-0004");
     }
 
     @Test
@@ -141,15 +140,18 @@ class OpenAiLlmTest {
     @Test
     void 에이전트_루프가_실_openai_어댑터로_툴_호출과_표_생성까지_간다() {
         OpenAiLlm llm = new OpenAiLlm(baseUrl, "test-key", "onprem-x");
-        ChatAgent agent = new ChatAgent(llm, new FixtureRepo(), SkillRegistry.FIXTURE_SKILL_QUERY);
+        ChatAgent agent = new ChatAgent(llm, SkillRegistry.FIXTURE_SKILL_QUERY);
         AgentResult result = agent.run(
-                List.of(new HistoryMessage(Role.USER, "ETCH-01 설비 정보 보여줘")), null);
+                List.of(new HistoryMessage(Role.USER, "S-0004 센서 설명해줘")), null);
 
         assertThat(result.finishReason()).isEqualTo(FinishReason.STOP);
-        assertThat(result.text()).contains("ETCH-01");
+        assertThat(result.text()).contains("S-0004");
 
+        // 스킬 스텝이 낸 표가 그대로 실려 온다(센서 → 소속 설비 → 최근 이벤트).
         List<String> titles = result.tables().stream().map(t -> t.title()).toList();
-        assertThat(titles).containsExactly("설비 정보", "챔버 정보", "센서 정보");
-        assertThat(result.tables().get(0).rows().get(0).get("ID")).isEqualTo("ETCH-01");
+        assertThat(titles).isNotEmpty();
+        assertThat(titles.stream().anyMatch(t -> t.contains("센서"))).isTrue();
+        assertThat(titles.stream().anyMatch(t -> t.contains("설비"))).isTrue();
+        assertThat(result.tables().get(0).rows().get(0)).containsEntry("SNSR_ID", "S-0004");
     }
 }

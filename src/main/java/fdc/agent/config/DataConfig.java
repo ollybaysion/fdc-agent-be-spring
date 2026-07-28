@@ -1,9 +1,6 @@
 package fdc.agent.config;
 
 import fdc.agent.chat.ChatAgent;
-import fdc.agent.data.EquipmentRepo;
-import fdc.agent.data.fixtures.FixtureRepo;
-import fdc.agent.data.oracle.OracleEquipmentRepo;
 import fdc.agent.llm.LlmTypes.LlmClient;
 import fdc.agent.llm.MockLlm;
 import fdc.agent.llm.OpenAiLlm;
@@ -18,15 +15,11 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * seam 배선. env(restricted 면 외부 차단) + 리소스 설정에 따라
- * mock↔openai, 번들↔akg 를 갈아끼운다. fixture↔oracle 는 dataSource 로 별개.
+ * mock↔openai, 번들↔akg 를 갈아끼운다. 스킬 조회의 fixture↔oracle 는
+ * dataSource 로 별개.
  */
 @Configuration
 public class DataConfig {
-
-    @Bean
-    public EquipmentRepo equipmentRepo(AppProps props, ObjectProvider<JdbcClient> jdbc) {
-        return props.isOracle() ? new OracleEquipmentRepo(jdbc.getObject()) : new FixtureRepo();
-    }
 
     @Bean
     public SkillQuery skillQuery(AppProps props, ObjectProvider<JdbcClient> jdbc) {
@@ -58,8 +51,7 @@ public class DataConfig {
     }
 
     @Bean
-    public ChatAgent chatAgent(
-            LlmClient llm, EquipmentRepo repo, SkillQuery skillQuery, SkillSource skillSource) {
-        return new ChatAgent(llm, repo, skillQuery, skillSource);
+    public ChatAgent chatAgent(LlmClient llm, SkillQuery skillQuery, SkillSource skillSource) {
+        return new ChatAgent(llm, skillQuery, skillSource);
     }
 }
