@@ -161,4 +161,41 @@ class ChatAgentApiTest {
         // 이미 제공됐으므로 요청 카드가 나가지 않는다(필드 생략).
         assertThat(done.has("dataRequests")).isFalse();
     }
+
+    @Test
+    void 스킬_인자가_없으면_done에_inputRequests로_요청된다() throws Exception {
+        // 측정 분석인데 param_index(센서) 없음 → mock LLM 이 request_input 을 호출하고,
+        // 에이전트가 done 페이로드에 입력 카드로 실어 보낸다(스킬 태그 포함).
+        MockHttpServletResponse res = chat("CVD-01 측정 분석해줘");
+        assertThat(res.getStatus()).isEqualTo(200);
+        String body = res.getContentAsString(StandardCharsets.UTF_8);
+
+        JsonNode done = SseTestSupport.donePayload(body);
+        assertThat(done).isNotNull();
+        assertThat(done.path("inputRequests").isArray()).isTrue();
+
+        JsonNode req = done.path("inputRequests").get(0);
+        assertThat(req.path("skill").asText()).isEqualTo("fdc_trace_reading");
+        assertThat(req.path("key").asText()).isEqualTo("param_index");
+        assertThat(req.path("label").asText()).isEqualTo("PARAM_INDEX");
+
+        // 입력을 청하는 안내 문구도 스트림된다.
+        assertThat(SseTestSupport.tokenText(body)).contains("입력 요청을 등록");
+    }
+
+    @Test
+    void 이미_제공된_입력은_done에_inputRequests로_다시_요청하지_않는다() throws Exception {
+        // inputs 로 param_index 를 실어 보내면, mock 이 재요청해도 에이전트가 억제한다.
+        String body = """
+                {"messages":[{"role":"user","content":"CVD-01 측정 분석해줘"}],
+                 "inputs":{"fdc_trace_reading":{"param_index":"7"}}}
+                """;
+        MockHttpServletResponse res = chatWithBody(body);
+        assertThat(res.getStatus()).isEqualTo(200);
+
+        JsonNode done = SseTestSupport.donePayload(res.getContentAsString(StandardCharsets.UTF_8));
+        assertThat(done).isNotNull();
+        // 이미 제공됐으므로 입력 카드가 나가지 않는다(필드 생략).
+        assertThat(done.has("inputRequests")).isFalse();
+    }
 }

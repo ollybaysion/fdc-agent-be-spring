@@ -8,6 +8,8 @@ import com.sun.net.httpserver.HttpServer;
 import fdc.agent.chat.ChatAgent;
 import fdc.agent.chat.ChatAgent.AgentResult;
 import fdc.agent.chat.ChatAgent.HistoryMessage;
+import fdc.agent.contract.FinishReason;
+import fdc.agent.contract.Role;
 import fdc.agent.data.fixtures.FixtureRepo;
 import fdc.agent.llm.LlmTypes.LlmMessage;
 import fdc.agent.llm.LlmTypes.LlmToolCall;
@@ -96,7 +98,7 @@ class OpenAiLlmTest {
     void 요청을_OpenAI_형식으로_보내고_tool_calls_응답을_파싱한다() {
         OpenAiLlm llm = new OpenAiLlm(baseUrl, "test-key", "onprem-x");
         LlmTurn turn = llm.next(
-                List.of(LlmMessage.of("user", "ETCH-01 설비 정보")),
+                List.of(LlmMessage.of(Role.USER, "ETCH-01 설비 정보")),
                 List.of(detailToolSpec()));
 
         assertThat(turn).isInstanceOf(LlmTurn.ToolCalls.class);
@@ -117,7 +119,7 @@ class OpenAiLlmTest {
     void tool_결과가_포함된_대화엔_최종_content를_돌려준다() {
         OpenAiLlm llm = new OpenAiLlm(baseUrl, "test-key", "onprem-x");
         LlmTurn turn = llm.next(List.of(
-                LlmMessage.of("user", "ETCH-01 설비 정보"),
+                LlmMessage.of(Role.USER, "ETCH-01 설비 정보"),
                 LlmMessage.assistantToolCalls(List.of(
                         new LlmToolCall("call_x1", "get_equipment_detail", Map.of("id", "ETCH-01")))),
                 LlmMessage.toolResult("call_x1", "get_equipment_detail", "설비 ETCH-01 요약")),
@@ -129,7 +131,7 @@ class OpenAiLlmTest {
     @Test
     void tools가_비면_tools_tool_choice를_요청에서_생략한다() {
         OpenAiLlm llm = new OpenAiLlm(baseUrl, "test-key", "onprem-x");
-        llm.next(List.of(LlmMessage.of("user", "후속 질문 3개 제안")), List.of());
+        llm.next(List.of(LlmMessage.of(Role.USER, "후속 질문 3개 제안")), List.of());
         JsonNode sent = lastSent();
         assertThat(sent.has("tools")).isFalse();
         assertThat(sent.has("tool_choice")).isFalse();
@@ -141,9 +143,9 @@ class OpenAiLlmTest {
         OpenAiLlm llm = new OpenAiLlm(baseUrl, "test-key", "onprem-x");
         ChatAgent agent = new ChatAgent(llm, new FixtureRepo(), SkillRegistry.FIXTURE_SKILL_QUERY);
         AgentResult result = agent.run(
-                List.of(new HistoryMessage("user", "ETCH-01 설비 정보 보여줘")), null);
+                List.of(new HistoryMessage(Role.USER, "ETCH-01 설비 정보 보여줘")), null);
 
-        assertThat(result.finishReason()).isEqualTo("stop");
+        assertThat(result.finishReason()).isEqualTo(FinishReason.STOP);
         assertThat(result.text()).contains("ETCH-01");
 
         List<String> titles = result.tables().stream().map(t -> t.title()).toList();

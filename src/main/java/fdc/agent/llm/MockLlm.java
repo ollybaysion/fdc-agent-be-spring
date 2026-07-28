@@ -1,5 +1,6 @@
 package fdc.agent.llm;
 
+import fdc.agent.contract.Role;
 import fdc.agent.llm.LlmTypes.LlmClient;
 import fdc.agent.llm.LlmTypes.LlmMessage;
 import fdc.agent.llm.LlmTypes.LlmToolCall;
@@ -22,6 +23,7 @@ public class MockLlm implements LlmClient {
     // 센서 ID 패턴 (예: S-0004). 도메인 스킬(snsr_id 파라미터) 호출용.
     private static final Pattern SENSOR_RE = Pattern.compile("\\bS-\\d{3,}\\b");
     private static final String REQUEST_DATA_TOOL = "request_data";
+    private static final String REQUEST_INPUT_TOOL = "request_input";
     private static final String QUERY_SNAPSHOT_TOOL = "query_snapshot";
     // 붙여넣은 데이터를 조회하겠다는 원 질문의 신호(주입 블록은 제외하고 본다).
     // "등록 완료"는 요청 카드를 채운 뒤의 이어가기 발화 — 적재된 표를 조회해 근거로 답한다.
@@ -33,7 +35,7 @@ public class MockLlm implements LlmClient {
     @Override
     public LlmTurn next(List<LlmMessage> messages, List<LlmToolSpec> tools) {
         LlmMessage last = messages.isEmpty() ? null : messages.get(messages.size() - 1);
-        if (last != null && "tool".equals(last.role())) {
+        if (last != null && last.role() == Role.TOOL) {
             return new LlmTurn.Final(last.content() != null ? last.content() : "");
         }
         String userText = lastUserText(messages);
@@ -43,21 +45,41 @@ public class MockLlm implements LlmClient {
         if (userText.contains("후속 질문 3개")) {
             return new LlmTurn.Final(followupSuggestions(messages));
         }
-        LlmToolCall call = planCall(userText, tools);
+        // 에이전트가 질문 앞에 끼운 섹션([분석 대상]/[제공된 데이터] — 별도 system
+        // 메시지)을 질문 뒤에 도로 이어붙여 키워드를 본다 — 덧붙이던 시절과 매칭
+        // 의미를 동일하게 유지(폼 블록에서 설비 ID 를 줍는 것 포함). 원 질문만
+        // 봐야 하는 트리거는 beforeInjectedBlocks 가 여전히 걸러낸다.
+        LlmToolCall call = planCall(withSection(userText, injectedSection(messages)), tools);
         if (call != null) {
             return new LlmTurn.ToolCalls(List.of(call));
         }
+        // 일반 안내의 질문 인용은 원 질문만 — 섹션까지 되읽어주면 소음이다.
         return new LlmTurn.Final(genericAnswer(userText));
     }
 
     private static String lastUserText(List<LlmMessage> messages) {
         for (int i = messages.size() - 1; i >= 0; i--) {
             LlmMessage m = messages.get(i);
-            if ("user".equals(m.role())) {
+            if (m.role() == Role.USER) {
                 return m.content() != null ? m.content() : "";
             }
         }
         return "";
+    }
+
+    /** 에이전트가 끼운 섹션 메시지(첫 system 프롬프트 제외) — 없으면 빈 문자열. */
+    private static String injectedSection(List<LlmMessage> messages) {
+        for (int i = messages.size() - 1; i > 0; i--) {
+            LlmMessage m = messages.get(i);
+            if (m.role() == Role.SYSTEM) {
+                return m.content() != null ? m.content() : "";
+            }
+        }
+        return "";
+    }
+
+    private static String withSection(String question, String section) {
+        return section.isEmpty() ? question : question + "\n\n" + section;
     }
 
     /** 키워드 기반 툴 선택. 설비 ID 가 없으면 툴 호출 안 함(일반 안내). */
@@ -72,6 +94,29 @@ public class MockLlm implements LlmClient {
                     .orElse(null);
             if (skill != null) {
                 return new LlmToolCall("call_1", skill.name(), Map.of("snsr_id", sensorMatch.group()));
+            }
+        }
+
+        // 측정/추적 분석인데 param_index(센서)가 아직 없으면 — 그 값 하나를 입력 카드로
+        // 요청한다(request_input). 실 LLM 이 "무슨 값이 없는지" 판단하는 자리를 키워드로
+        // 흉내낸다. 값이 이미 실려 왔으면 재요청하지 않는다: [제공된 입력](채팅이 되물어
+        // 채운 값)뿐 아니라 [질의 대상](담긴 분석이 들고 온 조회 키)도 같이 본다 —
+        // 에이전트는 둘 다 억제하므로, 여기서 한쪽만 보면 목만 헛되이 물어 답이 어색해진다.
+        boolean paramProvided =
+                (text.contains("[제공된 입력") || text.contains("[질의 대상"))
+                        && text.contains("param_index");
+        if (matches(beforeInjectedBlocks(text), "측정|추적|trace") && !paramProvided
+                && has(tools, REQUEST_INPUT_TOOL)) {
+            LlmToolSpec skill = tools.stream()
+                    .filter(t -> requiresParam(t, "param_index"))
+                    .findFirst()
+                    .orElse(null);
+            if (skill != null) {
+                return new LlmToolCall("call_1", REQUEST_INPUT_TOOL, Map.of(
+                        "skill", skill.name(),
+                        "key", "param_index",
+                        "label", "PARAM_INDEX",
+                        "description", "센서 파라미터 인덱스 (센서 이름이 아님)"));
             }
         }
 

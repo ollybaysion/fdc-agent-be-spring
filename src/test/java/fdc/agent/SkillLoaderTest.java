@@ -9,6 +9,7 @@ import fdc.agent.chat.AgentTool.ToolResult;
 import fdc.agent.chat.ChatAgent;
 import fdc.agent.chat.ChatAgent.AgentResult;
 import fdc.agent.chat.ChatAgent.HistoryMessage;
+import fdc.agent.contract.Role;
 import fdc.agent.data.fixtures.FixtureRepo;
 import fdc.agent.llm.MockLlm;
 import fdc.agent.skills.SkillLoader;
@@ -256,7 +257,7 @@ class SkillLoaderTest {
         ChatAgent agent = new ChatAgent(
                 new MockLlm(), new FixtureRepo(), SkillRegistry.FIXTURE_SKILL_QUERY);
         AgentResult result = agent.run(
-                List.of(new HistoryMessage("user", "S-0004 센서 설명해줘")), null);
+                List.of(new HistoryMessage(Role.USER, "S-0004 센서 설명해줘")), null);
         assertThat(result.text()).contains("S-0004");
         // 3스텝 표(센서/설비/이벤트).
         List<String> titles = result.tables().stream()
