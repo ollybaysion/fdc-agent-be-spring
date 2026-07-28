@@ -87,8 +87,9 @@ API 계약의 프로즈 원본은 demo-fe `API.md`+`types.ts`. Spring 판의 형
 - `GET /health`
 - `POST /api/fdc/v1/chat` — SSE `token* → done | error`. 에이전트 실행은
   스트리밍 전 완료(실패는 정상 HTTP 에러로).
-- 정형 조회 GET 은 없다. 설비·챔버·센서를 포함해 **모든 데이터는 스킬 툴로
-  조회하거나, 닿지 않으면 `dataRequests` 로 사용자에게 조달을 요청**한다.
+- `GET /api/fdc/v1/skills` — 사람이 고르는 스킬 카탈로그(로드된 spec 목록).
+- 데이터를 돌려주는 정형 조회 GET 은 없다. 설비·챔버·센서를 포함해 **모든 데이터는
+  스킬 툴로 조회하거나, 닿지 않으면 `dataRequests` 로 사용자에게 조달을 요청**한다.
 - 빌드·기동 절차 = `README.md`, 계약 프로즈 원본 = demo-fe
   `API.md`+`types.ts`, Oracle 연결 절차 = `docs/phase1-사내-runbook.md`.
 
