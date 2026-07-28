@@ -58,10 +58,31 @@ ORACLE_USER / ORACLE_PASSWORD / ORACLE_CONNECT_STRING   # host:port/service
 ORACLE_POOL_MIN=2 / ORACLE_POOL_MAX=10
 LLM_BASE_URL=http://llm-gw.internal/v1   # 미설정 시 결정적 mock
 LLM_API_KEY / LLM_MODEL
+TRACE_LOG_LEVEL=info                     # FE→BE→LLM 왕복 트레이스, off 로 끔
+LOG_FILE=logs/fdc-agent-be.log           # 로그 파일 위치(콘솔에도 그대로 나간다)
 ```
 
 demo-fe 쪽은 `BACKEND_URL=http://<host>:8080` — **오리진만**, `/api/fdc/v1`
 붙이지 말 것.
+
+## 왕복 트레이스 로그
+
+한 요청이 FE→BE→LLM 을 어떻게 오갔는지 로거 `fdc.trace` 하나로 다 남는다
+(기본 켜짐, `TRACE_LOG_LEVEL=off` 로 끔). 콘솔과 `logs/fdc-agent-be.log`
+(`LOG_FILE` 로 변경) 양쪽에 나가고, 줄들은 `X-Request-Id` 로 묶인다.
+
+| 블록 | 무엇을 보여주나 |
+| --- | --- |
+| `FE→BE 요청` | 받은 본문 전량 — messages·context·timeRange·scope·inputs·dataSnapshots(행은 앞 20개) |
+| `BE→LLM 툴 노출 (N개)` | 이번 요청에서 LLM 이 실제로 보는 툴 전량(이름·설명·파라미터 스키마) |
+| `BE→LLM step N 메시지` | 그 스텝에 보낸 메시지 배열(시스템 프롬프트·맥락 섹션·툴 결과 포함) |
+| `BE→LLM HTTP POST` | 전선에 나가는 JSON 원문(`tools[].function` 포함, 인증 헤더는 제외) |
+| `LLM→BE HTTP <status>` | GW 응답 원문 |
+| `툴 실행 <name>` | LLM 이 채운 인자 · 되먹인 요약 · 결과 표의 모양 |
+| `BE→FE 응답` | 최종 텍스트 + done 페이로드(tables·dataRequests·inputRequests·추천질문) |
+
+`query_snapshot` 은 붙여넣은 표가 있을 때만 툴 목록에 오른다 — 트레이스에
+없으면 모델이 안 부른 게 아니라 **부를 수 없었던** 것이다.
 
 ## HTTP 표면
 

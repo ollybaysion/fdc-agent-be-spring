@@ -10,6 +10,7 @@ import fdc.agent.config.AppProps;
 import fdc.agent.contract.ChatDataSnapshot;
 import fdc.agent.contract.ChatDonePayload;
 import fdc.agent.contract.QueryScope;
+import fdc.agent.util.Trace;
 import jakarta.servlet.ServletOutputStream;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -41,6 +42,9 @@ public class ChatController {
     private static final int MAX_MESSAGE_CONTENT_CHARS = 10_000;
 
     // 타이핑 연출 간격·총 지연 상한은 설정이다 — AppProps.Chat 참고.
+
+    /** 트레이스에 남길 스냅샷 행 수 — 이 뒤는 몇 행이 생략됐는지만 적는다. */
+    private static final int TRACE_SNAPSHOT_ROWS = 20;
 
     /**
      * 요청 body(FE 계약 느슨하게 수용 — 알 수 없는 필드는 무시).
@@ -100,6 +104,8 @@ public class ChatController {
             }
         }
 
+        traceRequest(body, messages);
+
         AgentResult result;
         try {
             result = agent.run(messages, new FormContext(
@@ -129,6 +135,11 @@ public class ChatController {
                 result.dataRequests().isEmpty() ? null : result.dataRequests(),
                 result.inputRequests().isEmpty() ? null : result.inputRequests());
 
+        Map<String, Object> traceOut = new LinkedHashMap<>();
+        traceOut.put("text", result.text());
+        traceOut.put("done", donePayload);
+        Trace.emit("BE→FE 응답 (SSE token* + done)", traceOut);
+
         res.setStatus(200);
         res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
         res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -154,6 +165,48 @@ public class ChatController {
         } finally {
             res.flushBuffer();
         }
+    }
+
+    /**
+     * FE 가 보낸 요청 본문을 트레이스에 남긴다 — 어떤 필드가 실려 왔고 무엇이
+     * 비었는지(null 포함) 그대로 보이게. 붙여넣은 표의 행만 앞부분으로 줄인다:
+     * 수천 행이 뒤 필드(scope·inputs)를 밀어내면 정작 볼 것이 묻힌다.
+     */
+    private static void traceRequest(ChatBody body, List<HistoryMessage> messages) {
+        if (!Trace.on()) {
+            return;
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("messages", messages);
+        out.put("context", body != null ? body.context() : null);
+        out.put("timeRange", body != null ? body.timeRange() : null);
+        out.put("scope", body != null ? body.scope() : null);
+        out.put("inputs", body != null ? body.inputs() : null);
+        out.put("dataSnapshots", body == null || body.dataSnapshots() == null
+                ? null
+                : body.dataSnapshots().stream().map(ChatController::traceSnapshot).toList());
+        Trace.emit("FE→BE 요청 POST /api/fdc/v1/chat", out);
+    }
+
+    /** 스냅샷 한 건의 트레이스 뷰 — 행은 앞 {@value #TRACE_SNAPSHOT_ROWS} 개까지. */
+    private static Map<String, Object> traceSnapshot(ChatDataSnapshot s) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        if (s == null) {
+            return out;
+        }
+        out.put("queryKey", s.queryKey());
+        out.put("label", s.label());
+        out.put("capturedAt", s.capturedAt());
+        out.put("columns", s.columns());
+        out.put("rowCount", s.rowCount());
+        List<List<String>> rows = s.rows();
+        if (rows == null || rows.size() <= TRACE_SNAPSHOT_ROWS) {
+            out.put("rows", rows);
+        } else {
+            out.put("rows", rows.subList(0, TRACE_SNAPSHOT_ROWS));
+            out.put("rowsOmitted", rows.size() - TRACE_SNAPSHOT_ROWS);
+        }
+        return out;
     }
 
     private static String sse(String event, Object data) {
