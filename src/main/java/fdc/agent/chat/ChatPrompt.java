@@ -43,6 +43,9 @@ public final class ChatPrompt {
     /** 붙여넣어 첨부된 데이터(스키마 카탈로그 — 행은 임시 DB 로 간다). */
     public static final String SECTION_DATA = "[제공된 데이터 — 사용자 첨부]";
 
+    /** 조회 절차가 어디까지 왔고 다음 한 걸음이 무엇인지({@link QueryProgress}). */
+    public static final String SECTION_PROGRESS = "[조회 절차 진행 상황]";
+
     /** 입력 카드로 채워 되보낸 스칼라 값. */
     public static final String SECTION_INPUTS = "[제공된 입력 — 사용자 입력]";
 
@@ -110,14 +113,16 @@ public final class ChatPrompt {
         return messages;
     }
 
-    /** 네 섹션을 빈 줄로 이어 하나의 맥락 블록으로. 전부 비면 null(주입 안 함). */
+    /** 맥락 섹션들을 빈 줄로 이어 하나의 블록으로. 전부 비면 null(주입 안 함). */
     public static String contextSection(
             QueryScope scope, FormContext formContext, List<ChatDataSnapshot> snapshots,
-            SnapshotDb snapshotDb, Map<String, Map<String, String>> inputs) {
+            SnapshotDb snapshotDb, QueryProgress progress,
+            Map<String, Map<String, String>> inputs) {
         return join(
                 queryScope(scope),
                 formContext(formContext),
                 dataSnapshots(snapshots, snapshotDb),
+                progress != null ? progress.promptSection() : null,
                 providedInputs(inputs));
     }
 
@@ -233,10 +238,14 @@ public final class ChatPrompt {
     /**
      * 붙여넣어 요청에 실린 스냅샷. 아무것도 없으면 null(주입 안 함).
      *
-     * <p>Design B: 행 있는(📌) 스냅샷은 {@link SnapshotDb}(임시 SQLite)로 적재되므로
-     * 여기엔 <b>스키마만</b> 편다 — 행은 프롬프트에 붓지 않고 query_snapshot 툴로
-     * 조회하게 한다(토큰 절약·대용량 정밀 조회). 카탈로그 항목(rows 없음)은 "이런 표가
-     * 있다"만 알린다 — 내용이 아직 안 왔으니 지어내지 말라는 신호다.
+     * <p>Design B: 행 있는 스냅샷은 {@link SnapshotDb}(임시 SQLite)로 적재되므로 여기엔
+     * <b>스키마만</b> 편다 — 행은 프롬프트에 붓지 않고 query_snapshot 툴로 조회하게 한다
+     * (토큰 절약·대용량 정밀 조회).
+     *
+     * <p>행이 없는 항목은 <b>두 종류로 갈라 적는다</b>. 조회해서 0행임을 확인한 것은
+     * <b>사실</b>이고("그 데이터는 없다"는 답의 근거다), 아직 안 온 것은 요청 대상이다.
+     * 둘을 뭉쳐 "미첨부"로 적으면, 없음을 확인해 등록한 사용자에게 같은 요청이 다시
+     * 나가거나 모델이 오지 않을 데이터를 기다린다.
      */
     static String dataSnapshots(List<ChatDataSnapshot> snapshots, SnapshotDb snapshotDb) {
         if (snapshots == null || snapshots.isEmpty()) {
@@ -249,15 +258,24 @@ public final class ChatPrompt {
                     + SnapshotQueryTool.NAME + " 툴에 SELECT 문을 주어 조회하라(행 데이터는 여기 없다).");
             parts.add(snapshotDb.schemaCatalog());
         }
+
+        List<String> emptyResults = new ArrayList<>();
         List<String> catalogOnly = new ArrayList<>();
         for (ChatDataSnapshot s : snapshots) {
-            if (s == null || (s.rows() != null && !s.rows().isEmpty())) {
+            if (s == null || s.hasRows()) {
                 continue;
             }
-            String label = s.label() != null && !s.label().isBlank() ? s.label() : s.queryKey();
-            List<String> cols = s.columns() != null ? s.columns() : List.of();
-            catalogOnly.add("- " + label + " (" + String.join(", ", cols)
-                    + ") — 내용 미첨부(필요하면 사용자에게 요청).");
+            String line = "- " + snapshotLabel(s) + " (" + columnList(s) + ")";
+            if (s.isEmptyResult()) {
+                emptyResults.add(line + " — 조회 결과 0행.");
+            } else {
+                catalogOnly.add(line + " — 내용 미첨부(필요하면 사용자에게 요청).");
+            }
+        }
+        if (!emptyResults.isEmpty()) {
+            parts.add("조회했으나 결과가 없던 항목 — 데이터가 없음이 확인된 것이다"
+                    + "(아직 안 온 것이 아니다. 다시 요청하지 말고 없다는 사실로 답하라):");
+            parts.addAll(emptyResults);
         }
         if (!catalogOnly.isEmpty()) {
             parts.add("아직 내용이 안 온 항목:");
@@ -265,6 +283,17 @@ public final class ChatPrompt {
         }
         // 머리표만 남았으면(적재된 표도 카탈로그도 없음) 주입하지 않는다.
         return parts.size() > 1 ? String.join("\n", parts) : null;
+    }
+
+    private static String snapshotLabel(ChatDataSnapshot s) {
+        if (s.label() != null && !s.label().isBlank()) {
+            return s.label();
+        }
+        return s.queryKey() != null && !s.queryKey().isBlank() ? s.queryKey() : "(이름 없는 항목)";
+    }
+
+    private static String columnList(ChatDataSnapshot s) {
+        return String.join(", ", s.columns() != null ? s.columns() : List.of());
     }
 
     /**

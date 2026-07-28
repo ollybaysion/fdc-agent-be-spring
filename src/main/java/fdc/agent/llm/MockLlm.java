@@ -10,6 +10,8 @@ import fdc.agent.llm.LlmTypes.LlmMessage;
 import fdc.agent.llm.LlmTypes.LlmToolCall;
 import fdc.agent.llm.LlmTypes.LlmToolSpec;
 import fdc.agent.llm.LlmTypes.LlmTurn;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -30,6 +32,16 @@ public class MockLlm implements LlmClient {
 
     // 센서 ID 패턴 (예: S-0004). 도메인 스킬(snsr_id 파라미터) 호출용.
     private static final Pattern SENSOR_RE = Pattern.compile("\\bS-\\d{3,}\\b");
+    // 진행 상황 섹션이 적어 준 다음 한 걸음 — 그대로 베껴 부르면 절차가 이어진다.
+    private static final Pattern NEXT_STEP =
+            Pattern.compile("queryId=\"([^\"]+)\",\\s*args=(\\{[^}]*})");
+    private static final Pattern JSON_PAIR = Pattern.compile("\"([^\"]+)\"\\s*:\\s*\"([^\"]*)\"");
+    // 사용자가 "직접 실행할 SQL 을 달라"고 말한 신호 — 조달 요청의 시작.
+    private static final Pattern WANTS_SQL =
+            Pattern.compile("SQL|쿼리\\s*(줘|주세요|요청)|조달|요청\\s*카드", Pattern.CASE_INSENSITIVE);
+    // request_data 툴 설명에 실린 풀 목록 한 줄 — "- id — 제목 (인자: a, b)".
+    private static final Pattern CATALOG_LINE =
+            Pattern.compile("(?m)^- (\\S+) — .*?\\(인자: ([^)]*)\\)");
     // 붙여넣은 데이터를 조회하겠다는 신호 — 원 질문에서만 찾는다.
     // "등록 완료"는 요청 카드를 채운 뒤의 이어가기 발화 — 적재된 표를 조회해 근거로 답한다.
     private static final Pattern WANTS_SNAPSHOT_QUERY =
@@ -84,6 +96,30 @@ public class MockLlm implements LlmClient {
      * {@code section} 에서 본다 — 둘을 섞지 않는 게 이 목의 유일한 규율이다.
      */
     private static LlmToolCall planCall(String question, String section, List<LlmToolSpec> tools) {
+        // 진행 중인 절차가 다음 걸음을 적어 뒀으면 그걸 이어 부른다 — 실 모델이 판단할
+        // "계속할까"를 목은 "적혀 있으면 간다"로 흉내낸다. 0행으로 끝난 절차에는 다음
+        // 걸음이 적히지 않으므로 여기서 자연히 멈춘다(억제가 아니라 부재로).
+        if (has(tools, DataRequestTool.NAME)) {
+            Matcher next = NEXT_STEP.matcher(section);
+            if (next.find()) {
+                return new LlmToolCall("call_1", DataRequestTool.NAME, Map.of(
+                        "queryId", next.group(1), "args", parseJsonPairs(next.group(2))));
+            }
+        }
+
+        // 사용자가 실행할 SQL 을 청하면 — 풀에서 인자를 채울 수 있는 첫 단계를 요청한다.
+        // 어느 스킬인지는 목이 모른다: 툴 스펙에 실린 카탈로그에서 인자 이름으로 찾는다
+        // (스킬이 늘거나 이름이 바뀌어도 목은 무수정).
+        Matcher sqlSensor = SENSOR_RE.matcher(question);
+        if (has(tools, DataRequestTool.NAME) && WANTS_SQL.matcher(question).find()
+                && sqlSensor.find()) {
+            String queryId = firstPoolStep(tools, "snsr_id");
+            if (queryId != null) {
+                return new LlmToolCall("call_1", DataRequestTool.NAME, Map.of(
+                        "queryId", queryId, "args", Map.of("snsr_id", sqlSensor.group())));
+            }
+        }
+
         // 센서 ID → snsr_id 파라미터를 요구하는 도메인 스킬 툴로(툴 이름 무관하게
         // 파라미터로 매칭 — 스킬이 늘어도 mock 무수정). 폼에 적힌 ID 도 주워야 하므로
         // 질문과 섹션을 함께 본다.
@@ -131,66 +167,50 @@ public class MockLlm implements LlmClient {
             }
         }
 
-        // 설비/센서 ID 가 없는데 특정 데이터를 요구하면 — DB 없이 조달을 요청(request_data).
-        // 실 LLM 이라면 모델이 "무엇이 없는지" 판단할 자리를, mock 은 키워드로 흉내낸다.
-        // 붙여넣은 표의 라벨이 요청을 오발화시키지 않게 원 질문만 본다(억제는 에이전트가
-        // queryKey 로 확정한다).
-        DataNeed need = matchDataNeed(question);
-        if (need != null && has(tools, DataRequestTool.NAME)) {
-            return new LlmToolCall("call_1", DataRequestTool.NAME, Map.of(
-                    "queryKey", need.queryKey(),
-                    "label", need.label(),
-                    "sql", need.sql(),
-                    "columns", need.columns()));
-        }
         return null;
     }
 
-    private record DataNeed(
-            String queryKey, String label, String sql, List<String> columns, List<String> triggers) {
-    }
-
-    // DB 없이 조달을 요청할 만한 데이터. 설비 계열도 여기에 있다 — 전용 조회 툴을
-    // 걷어낸 뒤로 설비·동종·셋업 이력도 "요청 → 붙여넣기"로만 들어온다.
-    private static final List<DataNeed> REQUESTABLE = List.of(
-            new DataNeed("sensor_list", "챔버별 센서 목록",
-                    "SELECT chamber, sensor_id, sensor_name\n  FROM fdc_sensor_master\n"
-                            + " WHERE equipment_id = :equipment_id\n ORDER BY chamber, sensor_id",
-                    List.of("CHAMBER", "SENSOR_ID", "SENSOR_NAME"),
-                    List.of("센서 목록")),
-            new DataNeed("recipe_steps", "레시피 STEP 구성",
-                    "SELECT recipe_id, step_no, step_name, duration_sec\n  FROM fdc_recipe_step\n"
-                            + " WHERE recipe_id = :recipe_id\n ORDER BY step_no",
-                    List.of("RECIPE_ID", "STEP_NO", "STEP_NAME", "DURATION_SEC"),
-                    List.of("레시피")),
-            new DataNeed("equipment_peers", "동종 설비 목록",
-                    "SELECT eqp_id, eqp_name, model_cd\n  FROM fdc_equipment\n"
-                            + " WHERE model_cd = (SELECT model_cd FROM fdc_equipment"
-                            + " WHERE eqp_id = :equipment_id)\n   AND eqp_id <> :equipment_id\n"
-                            + " ORDER BY eqp_id",
-                    List.of("EQP_ID", "EQP_NAME", "MODEL_CD"),
-                    List.of("동종", "피어")),
-            new DataNeed("setup_events", "설비 셋업·정비 이력",
-                    "SELECT evt_dt, evt_type_cd, evt_label\n  FROM fdc_setup_event\n"
-                            + " WHERE eqp_id = :equipment_id\n ORDER BY evt_dt DESC",
-                    List.of("EVT_DT", "EVT_TYPE_CD", "EVT_LABEL"),
-                    List.of("셋업", "정비 이력")),
-            new DataNeed("equipment_detail", "설비 기본 정보",
-                    "SELECT eqp_id, eqp_name, model_cd, vendor, use_yn\n  FROM fdc_equipment\n"
-                            + " WHERE eqp_id = :equipment_id",
-                    List.of("EQP_ID", "EQP_NAME", "MODEL_CD", "VENDOR", "USE_YN"),
-                    List.of("설비 정보", "설비 상세", "상세 정보")));
-
-    private static DataNeed matchDataNeed(String question) {
-        String q = question.toLowerCase();
-        for (DataNeed n : REQUESTABLE) {
-            for (String t : n.triggers()) {
-                if (q.contains(t.toLowerCase())) {
-                    return n;
-                }
+    /**
+     * 풀에서 <b>주어진 인자만으로 부를 수 있는 첫 단계</b>의 queryId. 목록은 request_data
+     * 툴 스펙의 queryId 설명에 실려 오므로, 목은 스킬 이름을 하나도 알 필요가 없다.
+     */
+    private static String firstPoolStep(List<LlmToolSpec> tools, String... argNames) {
+        Matcher line = CATALOG_LINE.matcher(queryIdDescription(tools));
+        List<String> wanted = List.of(argNames);
+        while (line.find()) {
+            List<String> args = Arrays.stream(line.group(2).split(","))
+                    .map(String::trim)
+                    .filter(s -> !s.isEmpty())
+                    .toList();
+            if (args.equals(wanted) && line.group(1).endsWith("#0")) {
+                return line.group(1);
             }
         }
         return null;
+    }
+
+    /** request_data 툴 스펙의 queryId 설명(= 등재된 조회 목록). 툴이 없으면 빈 문자열. */
+    private static String queryIdDescription(List<LlmToolSpec> tools) {
+        for (LlmToolSpec tool : tools) {
+            if (!tool.name().equals(DataRequestTool.NAME)) {
+                continue;
+            }
+            if (tool.parameters().get("properties") instanceof Map<?, ?> props
+                    && props.get("queryId") instanceof Map<?, ?> queryId) {
+                return String.valueOf(queryId.get("description"));
+            }
+        }
+        return "";
+    }
+
+    /** {@code {"a":"1","b":"2"}} → 맵. 목이 진행 섹션의 args 를 그대로 베낄 때만 쓴다. */
+    private static Map<String, Object> parseJsonPairs(String json) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        Matcher m = JSON_PAIR.matcher(json);
+        while (m.find()) {
+            out.put(m.group(1), m.group(2));
+        }
+        return out;
     }
 
     private static boolean matches(String text, String regex) {
@@ -208,28 +228,25 @@ public class MockLlm implements LlmClient {
     }
 
     /**
-     * 원 질문(이 3-메시지 맥락의 첫 user)의 키워드로 다음 걸음을 고른다 —
-     * 데이터 요청 왕복(sensor_list ↔ recipe_steps ↔ 설비 계열)이 추천 클릭만으로
-     * 이어지게.
+     * 원 질문(이 3-메시지 맥락의 첫 user)의 키워드로 다음 걸음을 고른다 — 조달 왕복
+     * (요청 → 붙여넣기 → 다음 단계)이 추천 클릭만으로 이어지게.
      */
     private static String followupSuggestions(List<LlmMessage> messages) {
         String original = messages.isEmpty() || messages.get(0).content() == null
                 ? ""
                 : messages.get(0).content();
-        if (original.contains("센서 목록")) {
-            return "[\"레시피 STEP 구성 알려줘\", \"ETCH-01 상세 정보 보여줘\", \"ETCH-01 동종 설비 알려줘\"]";
+        if (WANTS_SQL.matcher(original).find()) {
+            return "[\"등록 완료 — 이어서 분석해줘\", \"다음 단계도 SQL 로 요청해줘\","
+                    + " \"조회 결과가 없으면 어떻게 되나요?\"]";
         }
-        if (original.contains("레시피")) {
-            return "[\"챔버별 센서 목록 보여줘\", \"ETCH-01 상세 정보 보여줘\", \"ETCH-01 셋업 이력 알려줘\"]";
-        }
-        return "[\"챔버별 센서 목록 보여줘\", \"레시피 STEP 구성 알려줘\", \"ETCH-01 상세 정보 보여줘\"]";
+        return "[\"S-0004 조회 SQL 로 요청해줘\", \"CVD-01 측정 분석해줘\", \"이 데이터로 정리해줘\"]";
     }
 
     private static String genericAnswer(String text) {
         String q = text.trim();
         return (q.isEmpty() ? "" : "'" + q + "' 질문 주셨네요. ")
                 + "설비 ID(예: ETCH-01)나 센서 ID(예: S-0004)와 무엇을 보고 싶은지 알려주시면, "
-                + "필요한 데이터를 조회 SQL 과 함께 요청해 드립니다. "
+                + "등재된 조회 목록에서 골라 실행 가능한 SQL 과 함께 요청해 드립니다. "
                 + "(fdc-agent-be Phase 2 — 온프렘 LLM 미설정 시 mock 응답)";
     }
 }

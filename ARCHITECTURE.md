@@ -57,13 +57,15 @@ fdc-agent-be-spring/
     │   ├── chat/      # ChatAgent(툴 루프) · ChatPrompt(프롬프트 조립) · AgentTool
     │   │              # 툴 구현: SnapshotQueryTool · DataRequestTool · InputRequestTool
     │   │              # SnapshotDb(붙여넣은 표 → 임시 SQLite)
+    │   │              # QueryKey·QueryProgress(조달 왕복의 조회 키 = 절차 진행)
     │   ├── llm/       # LlmClient seam(LlmTypes 내 인터페이스): MockLlm ↔ OpenAiLlm
     │   ├── skills/    # SkillLoader·SkillRegistry — spec.json → 에이전트 툴 컴파일
+    │   │              # QueryPool(요청 가능한 조회 목록) · SqlRender(리터럴 SQL 렌더)
     │   └── util/Js.java  # JS bit-parity 헬퍼 (해시·반올림·수 표기)
     ├── main/resources/
     │   ├── application.yml            # env 이름 계약 유지 (DATA_SOURCE/ORACLE_*/LLM_*)
     │   └── skills/*.spec.json         # ★ spec v2 (형식 진실원 = agent-knowledge-governance)
-    ├── test/java/fdc/agent/           # JUnit 70
+    ├── test/java/fdc/agent/           # JUnit 110
     ├── scripts/parity.sh              # Node 대조군 잔여 3케이스
     └── docs/phase1-사내-runbook.md    # Oracle 연결 절차 (사내 단계)
 ```
@@ -108,6 +110,31 @@ API 계약의 프로즈 원본은 demo-fe `API.md`+`types.ts`. Spring 판의 형
 다시 요청하지 않도록 하는 **억제는 수집 툴이 결정론적으로 확정**한다(모델 판단에
 기대지 않는다). 수집 툴 인스턴스는 요청 단위다.
 
+### 조달 왕복 — 풀에서 고르고, 도착에서 이어간다
+
+BE 가 DB 에 닿지 못하는 배포에서는 조회가 왕복이 된다: 요청 카드 → 사용자가 사내에서
+실행 → 결과 붙여넣기 → 다음 질문에 실려 옴. 이 왕복의 규율은 셋이다.
+
+**① 요청은 풀 안에서만.** `QueryPool` 은 로드된 스킬 spec 의 `steps[]` 를 평면화한
+목록이고, `request_data` 의 `queryId` 는 그 목록의 **닫힌 enum** 이다. 모델은 고르고
+인자만 채운다 — 실행 문장(`SqlRender`)·조회 키(`QueryKey`)·기대 컬럼은 BE 가 만든다.
+렌더된 SQL 은 **사용자가 자기 권한으로 실행**하므로 이스케이프는 미관이 아니라 경계다.
+같은 spec 이 조회 툴로도 컴파일되므로, 스킬을 등재하면 실행과 조달이 함께 늘고 등재되지
+않은 조회는 어느 쪽으로도 나가지 않는다. 풀이 비면 `request_data` 자체가 안 붙는다.
+
+**② 진행은 저장하지 않고 도착에서 유도한다.** `queryKey = {스킬}#{단계}__{필수인자}` 라
+한 절차의 모든 단계가 같은 run 이름표를 단다. 이번 요청에 실려 온 스냅샷의 키만 풀에
+비추면 "어디까지 왔고 다음이 무엇인지"가 나오고(`QueryProgress`), 그 한 걸음이 맥락에
+실려 모델을 민다. 계약에 진행 필드도, 서버 세션도 필요 없다. 앞 단계 결과를 바인드로
+쓰는 단계는 **도착한 표에서 값을 읽는다** — 여러 행이면 모델이 `pick` 으로 고르되
+그 컬럼에 실제로 있는 값 중에서만 고른다(갈림길은 맡기고 창작은 막는다).
+
+**③ "없음"은 사실이다.** `ChatDataSnapshot` 은 세 상태다 — 행 있음 / **조회 결과 0행** /
+아직 안 옴. 0행은 "그 데이터는 없다"는 답의 근거이고 그 절차는 거기서 정상 종료된다.
+억제 기준도 "키가 있나"가 아니라 **"도착했나"** 다: 키만 있고 내용이 안 온 항목은 다시
+요청할 수 있어야 한다. 스킬 실행기도 같은 규율을 따라 *앞 단계가 없어 실행하지 못한
+스텝*과 *실행했는데 0행인 스텝*을 갈라 적는다.
+
 ### HTTP 표면 · 문서 포인터
 
 - `GET /health`
@@ -116,6 +143,7 @@ API 계약의 프로즈 원본은 demo-fe `API.md`+`types.ts`. Spring 판의 형
 - `GET /api/fdc/v1/skills` — 사람이 고르는 스킬 카탈로그(로드된 spec 목록).
 - 데이터를 돌려주는 정형 조회 GET 은 없다. 설비·챔버·센서를 포함해 **모든 데이터는
   스킬 툴로 조회하거나, 닿지 않으면 `dataRequests` 로 사용자에게 조달을 요청**한다.
+  조달 요청도 등재된 스킬 spec 의 조회만 나간다(임의 SQL 없음).
 - 빌드·기동 절차 = `README.md`, 계약 프로즈 원본 = demo-fe
   `API.md`+`types.ts`, Oracle 연결 절차 = `docs/phase1-사내-runbook.md`.
 

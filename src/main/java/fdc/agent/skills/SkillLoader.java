@@ -141,7 +141,23 @@ public final class SkillLoader {
                 + " 묻는 상황에서 호출한다 (" + when + ").";
     }
 
+    /**
+     * 스텝 하나의 결말. <b>실행하지 못한 것과 실행했는데 0행인 것은 다른 사실이다</b> —
+     * 둘 다 "(0행)"으로 적으면 모델은 "그 데이터는 없다"고 단정한다. 앞 단계가 비어
+     * 바인드를 못 채운 스텝은 조회를 시도조차 하지 않았다.
+     */
+    private record StepOutcome(boolean skipped, List<Map<String, Object>> rows) {
+        static StepOutcome notRun() {
+            return new StepOutcome(true, List.of());
+        }
+
+        static StepOutcome of(List<Map<String, Object>> rows) {
+            return new StepOutcome(false, rows != null ? rows : List.of());
+        }
+    }
+
     private static ToolResult runSkill(SkillSpec spec, SkillQuery query, Map<String, Object> args) {
+        List<StepOutcome> outcomes = new ArrayList<>();
         List<List<Map<String, Object>>> stepRows = new ArrayList<>();
 
         for (int i = 0; i < spec.steps().size(); i++) {
@@ -177,13 +193,16 @@ public final class SkillLoader {
             }
 
             if (missingBind) {
+                outcomes.add(StepOutcome.notRun());
                 stepRows.add(List.of());
                 continue;
             }
-            stepRows.add(query.query(step.sql(), binds));
+            List<Map<String, Object>> rows = query.query(step.sql(), binds);
+            outcomes.add(StepOutcome.of(rows));
+            stepRows.add(rows != null ? rows : List.of());
         }
 
-        return buildResult(spec, stepRows);
+        return buildResult(spec, outcomes);
     }
 
     /**
@@ -193,13 +212,12 @@ public final class SkillLoader {
      * 반드시 포함({@code steps[].produces}) + 하지 말 것 + 예시. 값 의미(코드표)는
      * 스킬에 없다: 표준 db-schema 문서 fetch 경로는 후속 과제(foundry 설계 §13).
      */
-    private static ToolResult buildResult(SkillSpec spec, List<List<Map<String, Object>>> stepRows) {
+    private static ToolResult buildResult(SkillSpec spec, List<StepOutcome> outcomes) {
         List<String> parts = new ArrayList<>();
         parts.add("[조회 결과]");
         for (int i = 0; i < spec.steps().size(); i++) {
-            List<Map<String, Object>> rows = i < stepRows.size() ? stepRows.get(i) : List.of();
-            parts.add("- " + spec.steps().get(i).title() + ": "
-                    + (rows.isEmpty() ? "(0행)" : stringify(rows)));
+            StepOutcome outcome = i < outcomes.size() ? outcomes.get(i) : StepOutcome.notRun();
+            parts.add("- " + spec.steps().get(i).title() + ": " + describe(outcome));
         }
 
         String particle = hasFinalConsonant(spec.focus()) ? "을" : "를";
@@ -229,13 +247,21 @@ public final class SkillLoader {
 
         List<ChatTable> tables = new ArrayList<>();
         for (int i = 0; i < spec.steps().size(); i++) {
-            List<Map<String, Object>> rows = i < stepRows.size() ? stepRows.get(i) : List.of();
+            List<Map<String, Object>> rows = i < outcomes.size() ? outcomes.get(i).rows() : List.of();
             if (!rows.isEmpty()) {
                 tables.add(rowsToTable(spec.steps().get(i).title(), rows));
             }
         }
 
         return new ToolResult(String.join("\n", parts), tables.isEmpty() ? null : tables);
+    }
+
+    /** 없음의 두 종류를 갈라 적는다 — 조회한 0행인가, 조회하지 못한 것인가. */
+    private static String describe(StepOutcome outcome) {
+        if (outcome.skipped()) {
+            return "(앞 단계 결과가 없어 조회하지 않음 — 데이터가 없다는 뜻이 아니다)";
+        }
+        return outcome.rows().isEmpty() ? "(조회 결과 0행)" : stringify(outcome.rows());
     }
 
     private static ChatTable rowsToTable(String title, List<Map<String, Object>> rows) {
