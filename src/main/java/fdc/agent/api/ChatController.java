@@ -3,7 +3,6 @@ package fdc.agent.api;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import fdc.agent.chat.ChatAgent;
 import fdc.agent.chat.ChatAgent.AgentResult;
-import fdc.agent.chat.ChatAgent.FormContext;
 import fdc.agent.chat.ChatAgent.HistoryMessage;
 import fdc.agent.config.ApiException;
 import fdc.agent.config.AppProps;
@@ -59,8 +58,6 @@ public class ChatController {
      */
     public record ChatBody(
             List<HistoryMessage> messages,
-            List<FormContext.ContextRow> context,
-            FormContext.TimeRange timeRange,
             List<ChatDataSnapshot> dataSnapshots,
             Map<String, Map<String, String>> inputs,
             QueryScope scope) {
@@ -108,9 +105,7 @@ public class ChatController {
 
         AgentResult result;
         try {
-            result = agent.run(messages, new FormContext(
-                    body != null ? body.context() : null,
-                    body != null ? body.timeRange() : null),
+            result = agent.run(messages,
                     body != null ? body.dataSnapshots() : null,
                     body != null ? body.inputs() : null,
                     body != null ? body.scope() : null);
@@ -133,7 +128,9 @@ public class ChatController {
                 result.tables().isEmpty() ? null : result.tables(),
                 result.recommendQuestion().isEmpty() ? null : result.recommendQuestion(),
                 result.dataRequests().isEmpty() ? null : result.dataRequests(),
-                result.inputRequests().isEmpty() ? null : result.inputRequests());
+                result.inputRequests().isEmpty() ? null : result.inputRequests(),
+                result.images().isEmpty() ? null : result.images(),
+                result.links().isEmpty() ? null : result.links());
 
         Map<String, Object> traceOut = new LinkedHashMap<>();
         traceOut.put("text", result.text());
@@ -178,8 +175,6 @@ public class ChatController {
         }
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("messages", messages);
-        out.put("context", body != null ? body.context() : null);
-        out.put("timeRange", body != null ? body.timeRange() : null);
         out.put("scope", body != null ? body.scope() : null);
         out.put("inputs", body != null ? body.inputs() : null);
         out.put("dataSnapshots", body == null || body.dataSnapshots() == null

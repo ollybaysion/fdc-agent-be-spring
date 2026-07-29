@@ -4,10 +4,13 @@ import fdc.agent.chat.ChatAgent;
 import fdc.agent.llm.LlmTypes.LlmClient;
 import fdc.agent.llm.MockLlm;
 import fdc.agent.llm.OpenAiLlm;
+import fdc.agent.lines.AkgLineSource;
+import fdc.agent.lines.LineSource;
 import fdc.agent.skills.AkgSkillSource;
 import fdc.agent.skills.SkillQuery;
 import fdc.agent.skills.SkillRegistry;
 import fdc.agent.skills.SkillSource;
+import java.util.List;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -48,6 +51,18 @@ public class DataConfig {
         return !props.isRestricted() && akg.isConfigured()
                 ? new AkgSkillSource(akg.url(), akg.token(), akg.refreshSeconds())
                 : SkillRegistry::bundledSpecs;
+    }
+
+    /**
+     * 라인 출처 seam — 스킬과 같은 스위치를 탄다. 미설정/제한망이면 <b>빈 목록</b>:
+     * BE 는 라인 코드를 지어내지 않고, 빈 목록을 받은 화면은 라인 칸을 안 그린다.
+     */
+    @Bean
+    public LineSource lineSource(AppProps props) {
+        AppProps.Akg akg = props.akg();
+        return !props.isRestricted() && akg.isConfigured()
+                ? new AkgLineSource(akg.url(), akg.token(), akg.refreshSeconds())
+                : List::of;
     }
 
     @Bean

@@ -94,7 +94,7 @@ API 계약의 프로즈 원본은 demo-fe `API.md`+`types.ts`. Spring 판의 형
 | --- | --- | --- |
 | 툴 정의(name·parameters·description) | 각 `AgentTool` | 스킬 툴은 spec 이 컴파일된 결과 |
 | 툴 사용 규칙 | 각 `AgentTool.guidance()` | **붙은 툴의 규칙만** 시스템 프롬프트에 실린다 |
-| 맥락 섹션(질의 대상·폼·첨부·입력) | `ChatPrompt` | 마지막 사용자 메시지 앞의 별도 system 메시지 |
+| 맥락 섹션(질의 대상·첨부·입력) | `ChatPrompt` | 마지막 사용자 메시지 앞의 별도 system 메시지 |
 
 `ChatAgent` 는 이 중 무엇도 적지 않는다 — 툴을 모아 프롬프트를 받고, LLM 이 부른
 이름으로 툴을 찾아 실행하고, 요약을 되먹이는 루프일 뿐이다.
@@ -250,7 +250,6 @@ Phase 3 이후 모든 신규 작업은 이 레포에서만 진행한다.
 
 **API.md 스펙 잔여 (미구현 — 사내 단계 TODO)**:
 
-- `context` 배열 캡(≤50).
 - 응답측 캡(rows≤1000, chart points≤5000, timeline≤500, 누적 chars≤100k)
   → `truncated` 표기. 현재 `finishReason:"length"` 는 MAX_STEPS 소진 표식일 뿐
   크기 캡이 아님.
