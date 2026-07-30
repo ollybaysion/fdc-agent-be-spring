@@ -529,29 +529,32 @@ details.rawbox pre {
 <section>
   <h2 id="skills">4. GET /api/fdc/v1/skills</h2>
   <p>사람이 고를 수 있는 스킬 목록. 채팅이 툴로 컴파일해 쓰는 것과 <b>같은 spec</b>을
-  편다(출처는 <code>SkillSource</code> — akg 허브가 붙어 있으면 허브, 아니면 classpath
-  번들). FE의 "설비 추가" 진입이 이 응답으로 입력 카드·데이터 요청 카드를 세운다 —
+  편다. FE의 "설비 추가" 진입이 이 응답으로 입력 카드·데이터 요청 카드를 세운다 —
   <code class="cite">api/SkillsController.java:14-19</code>.</p>
+  <p><mark>목록의 내용물은 배포에 따라 다르다.</mark> 출처는 <code>SkillSource</code>
+  seam — akg 허브가 붙어 있으면 사내 실 스킬이, 미연결이면 레포에 번들된
+  <b>예제 spec</b>(classpath <code>skills/*.spec.json</code>, 데모·검증용 폴백)이 나간다.
+  아래 예시의 값은 전부 자리표시자다.</p>
 
   <pre><code>200 OK
 {
   "skills": [
     {
-      "skill": "fdc_explain_sensor",      // 툴 이름(언더스코어) — inputs[skill][key] 회신 키
-      "name": "fdc-explain-sensor",       // spec 이름(케밥)
-      "unit": "설비",
-      "focus": "센서 상태 해설",
-      "description": "…",                 // 합성 라우팅 문장 — 화면에선 부연으로만
-      "argumentHint": "…",                // 선택
-      "anchorTable": "…",                 // 선택
-      "inputs": [ { "key": "snsr_id", "required": true, "description": "…" } ],
+      "skill": "…",          // 툴 이름(언더스코어) — inputs[skill][key] 회신 키
+      "name": "…",           // spec 이름(케밥)
+      "unit": "…",
+      "focus": "…",
+      "description": "…",    // 합성 라우팅 문장 — 화면에선 부연으로만
+      "argumentHint": "…",   // 선택
+      "anchorTable": "…",    // 선택
+      "inputs": [ { "key": "…", "required": true, "description": "…" } ],
       "steps": [
         {
           "title": "…",
-          "produces": "…",                // 선택
-          "sql": "SELECT … WHERE id = :snsr_id",  // :var 가 남은 미완성 SQL
-          "argBinds": { "snsr_id": "snsr_id" },   // bind 이름 → 스킬 인자 이름
-          "priorStepBinds": []                    // 앞 스텝 결과에서 오는 bind
+          "produces": "…",                 // 선택
+          "sql": "SELECT … WHERE x = :arg",  // :var 가 남은 미완성 SQL
+          "argBinds": { "arg": "…" },        // bind 이름 → 스킬 인자 이름
+          "priorStepBinds": []               // 앞 스텝 결과에서 오는 bind
         }
       ]
     }
@@ -729,7 +732,7 @@ data: {"message":"stream error"}</code></pre>
       <p class="card-title">스킬 spec에서 조달 카드 생성</p>
       <ol>
         <li>LLM 툴 루프 — 스킬 선택, 필요한 조회 식별</li>
-        <li><code>queryKey = fdc-explain-sensor#0__snsr_id=S-0004</code> 발급 (BE 생성)</li>
+        <li><code>queryKey = &lt;스킬&gt;#&lt;단계&gt;__&lt;인자&gt;=&lt;값&gt;</code> 발급 (BE 생성)</li>
       </ol>
       <p class="note">SQL은 spec의 것 — 모델이 자유 저작하지 않는다.</p>
     </div>
