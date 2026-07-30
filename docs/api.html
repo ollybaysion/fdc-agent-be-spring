@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>fdc-agent-be — API 레퍼런스</title>
+<style>
+/* ── 테마 변수 ─────────────────────────────────────────────
+   기본 = 라이트. 다크는 두 경로로 켜진다:
+   ① OS 설정(prefers-color-scheme) — 단 수동 라이트 선택이 이김
+   ② 수동 토글(:root[data-theme="dark"]) — Artifact 뷰어 계약과 동일 셀렉터 */
+:root {
+  color-scheme: light;
+  --bg: #ffffff;
+  --fg: #1f2328;
+  --muted: #59636e;
+  --border: #d1d9e0;
+  --accent: #0969da;
+  --surface: #f6f8fa;
+  --code-bg: #f0f2f5;
+  --mark-bg: #fff8c5;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "D2Coding",
+    monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --border: #3d444d;
+    --accent: #4493f8;
+    --surface: #151b23;
+    --code-bg: #1c2128;
+    --mark-bg: #3a3000;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0d1117;
+  --fg: #e6edf3;
+  --muted: #9198a1;
+  --border: #3d444d;
+  --accent: #4493f8;
+  --surface: #151b23;
+  --code-bg: #1c2128;
+  --mark-bg: #3a3000;
+}
+:root[data-theme="light"] { color-scheme: light; }
+
+/* ── 기본 ── */
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.7;
+  overflow-wrap: break-word;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ── 레이아웃: 사이드 TOC + 본문. minmax(0,1fr)이 pre/table 폭 폭주를 막는다 ── */
+.layout {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 1.5rem 4rem;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 2.5rem;
+}
+nav#toc {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: 100vh;
+  overflow-y: auto;
+  padding: 1.75rem 0;
+  font-size: 0.85rem;
+}
+nav#toc .toc-title {
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+nav#toc ol { list-style: none; margin: 0; padding: 0; }
+nav#toc li { margin: 0.15rem 0; }
+nav#toc li.toc-h3 { padding-left: 1rem; }
+nav#toc a { color: var(--muted); display: block; padding: 0.1rem 0.5rem; border-left: 2px solid transparent; }
+nav#toc a:hover { color: var(--fg); text-decoration: none; }
+nav#toc a.active { color: var(--accent); border-left-color: var(--accent); }
+main { min-width: 0; padding-top: 1.75rem; }
+@media (max-width: 960px) {
+  .layout { grid-template-columns: 1fr; gap: 0; }
+  nav#toc { position: static; max-height: none; border-bottom: 1px solid var(--border); }
+}
+
+/* ── 헤딩 ── */
+h1 { font-size: 1.8rem; line-height: 1.3; margin: 0.5rem 0 0.25rem; }
+h2 { font-size: 1.35rem; margin: 2.5rem 0 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
+h3 { font-size: 1.1rem; margin: 1.75rem 0 0.5rem; }
+h2, h3 { scroll-margin-top: 1rem; }
+hr + section > h2:first-child { border-top: none; padding-top: 0; }
+.hanchor { margin-left: 0.35rem; opacity: 0; font-size: 0.85em; }
+h2:hover .hanchor, h3:hover .hanchor { opacity: 0.7; }
+
+/* ── 문서 메타: 버전 배지·작성일·개정 로그 ── */
+.badge {
+  display: inline-block;
+  vertical-align: middle;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--accent);
+}
+.doc-meta { color: var(--muted); font-size: 0.9rem; margin: 0 0 1rem; }
+details.revlog {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+}
+details.revlog summary { cursor: pointer; font-weight: 600; color: var(--muted); }
+details.revlog ul { margin: 0.5rem 0 0.25rem; }
+
+/* ── 코드·다이어그램·표: 가로 스크롤은 각자 컨테이너 안에서만 ── */
+code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--code-bg);
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+}
+code.cite { color: var(--muted); }
+pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.9rem 1.1rem;
+  overflow-x: auto;
+  line-height: 1.5;
+}
+pre code { background: none; padding: 0; font-size: 0.85rem; }
+pre.diagram {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  line-height: 1.3;
+}
+figure { margin: 1.25rem 0; }
+figcaption { color: var(--muted); font-size: 0.85rem; margin-top: 0.4rem; }
+.table-wrap { overflow-x: auto; margin: 1rem 0; }
+table { border-collapse: collapse; font-size: 0.9rem; min-width: 100%; }
+th, td { border: 1px solid var(--border); padding: 0.4rem 0.75rem; text-align: left; vertical-align: top; }
+th { background: var(--surface); }
+blockquote {
+  margin: 1rem 0;
+  padding: 0.25rem 1rem;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+mark { background: var(--mark-bg); color: inherit; }
+hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+
+/* ── 파생물 표기(md 변환 모드 전용) ── */
+footer.derived {
+  margin-top: 3rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+/* ── 테마 토글 ── */
+#theme-toggle {
+  position: fixed;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 10;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.25rem 0.75rem;
+  cursor: pointer;
+}
+#theme-toggle:hover { color: var(--fg); }
+
+/* ── 인쇄 ── */
+@media print {
+  #theme-toggle, nav#toc, .hanchor { display: none; }
+  .layout { display: block; max-width: none; padding: 0; }
+  body { font-size: 11pt; }
+  pre, .table-wrap { overflow-x: visible; }
+  a { color: inherit; }
+}
+
+/* ═══════ 시퀀스 패턴 CSS:START ═══════ */
+/* 액터 의미색 — A = FE(demo-fe, 구리), B = BE(fdc-agent-be, 보라).
+   라이트/다크 쌍 유지. */
+:root {
+  --actor-a: #b3622f;
+  --actor-a-soft: #f6e8dd;
+  --actor-b: #6f56c5;
+  --actor-b-soft: #ece7f9;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --actor-a: #d98a50;
+    --actor-a-soft: #33261c;
+    --actor-b: #a08ae0;
+    --actor-b-soft: #272138;
+  }
+}
+:root[data-theme="dark"] {
+  --actor-a: #d98a50;
+  --actor-a-soft: #33261c;
+  --actor-b: #a08ae0;
+  --actor-b-soft: #272138;
+}
+
+/* 무대: 좌우 라이프라인(세로 점선). 시간은 위→아래로 흐른다 */
+.seq { position: relative; margin: 1.5rem 0; }
+.seq::before, .seq::after {
+  content: "";
+  position: absolute;
+  top: 58px;
+  bottom: 10px;
+  border-left: 2px dashed var(--border);
+}
+.seq::before { left: 5.5%; }
+.seq::after { right: 5.5%; }
+
+/* 액터 카드 — 스크롤해도 위에 고정 */
+.seq .actors {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0.5rem 0 0.8rem;
+  background: linear-gradient(var(--bg) 78%, transparent);
+}
+.seq .actor {
+  background: var(--surface);
+  border: 1.5px solid;
+  border-radius: 10px;
+  padding: 0.5rem 1rem;
+  max-width: 46%;
+}
+.seq .actor .name { font-weight: 700; font-size: 0.95rem; }
+.seq .actor .desc { font-size: 0.75rem; color: var(--muted); line-height: 1.45; }
+.seq .actor.a-a { border-color: var(--actor-a); }
+.seq .actor.a-a .name { color: var(--actor-a); }
+.seq .actor.a-b { border-color: var(--actor-b); text-align: right; }
+.seq .actor.a-b .name { color: var(--actor-b); }
+
+/* 화살표 한 개 = 실제로 오간 메시지 한 개. 방향은 to-b(A→B)/to-a(B→A) */
+.wire { position: relative; margin: 1.75rem 5.5% 0.75rem; height: 22px; }
+.wire .line { position: absolute; left: 0; right: 0; top: 50%; border-top: 2px solid; }
+.wire.to-b .line { border-color: var(--actor-a); }
+.wire.to-a .line { border-color: var(--actor-b); }
+.wire .head { position: absolute; top: 50%; width: 10px; height: 10px; border-top: 2px solid; border-right: 2px solid; }
+.wire.to-b .head { right: 0; border-color: var(--actor-a); transform: translateY(-50%) rotate(45deg); }
+.wire.to-a .head { left: 0; border-color: var(--actor-b); transform: translateY(-50%) rotate(225deg); }
+.wire .tag {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: var(--bg);
+  padding: 2px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.wire.to-b .tag { color: var(--actor-a); }
+.wire.to-a .tag { color: var(--actor-b); }
+.wire .tag small { color: var(--muted); font-weight: 400; }
+
+/* 페이로드 카드 — 그 화살표에 실린 내용. 제목은 heading이 아니라 .card-title */
+.seq .payload {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin: 0 11% 0.5rem;
+  padding: 0.9rem 1.1rem;
+}
+.seq .payload .card-title { margin: 0 0 0.2rem; font-weight: 600; }
+.seq .payload .note { font-size: 0.85rem; color: var(--muted); margin: 0.1rem 0 0; }
+.seq .payload .note b { color: var(--fg); }
+
+/* 메시지 스택 — 페이로드 내부 항목을 칩과 함께 나열 */
+.seq .stack { display: flex; flex-direction: column; gap: 6px; margin: 0.6rem 0 0.2rem; }
+.seq .msg {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.seq .msg .gist { font-size: 0.85rem; line-height: 1.55; overflow-wrap: anywhere; }
+.seq .msg .ann { display: block; margin-top: 3px; font-size: 0.75rem; font-weight: 600; color: var(--muted); }
+.seq .msg.from-a .ann { color: var(--actor-a); }
+.seq .msg.from-b .ann { color: var(--actor-b); }
+@media (max-width: 640px) { .seq .msg { grid-template-columns: 1fr; gap: 4px; } }
+
+/* 칩 — 색 = 누가 말했나 */
+.chip {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 2px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+  justify-self: start;
+  background: var(--surface);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+.chip.a { background: var(--actor-a-soft); color: var(--actor-a); border-color: transparent; }
+.chip.b { background: var(--actor-b-soft); color: var(--actor-b); border-color: transparent; }
+
+/* 내부 처리 박스 — 화살표 밖(한쪽 내부)에서 일어난 일. 점선 = "선 밖" */
+.seq .local {
+  margin: 1.5rem 11% 0.5rem 5.5%;
+  max-width: 680px;
+  border: 1.5px dashed var(--actor-a);
+  border-radius: 12px;
+  background: var(--actor-a-soft);
+  padding: 0.8rem 1.1rem;
+}
+.seq .local.of-b {
+  margin: 1.5rem 5.5% 0.5rem 11%;
+  border-color: var(--actor-b);
+  background: var(--actor-b-soft);
+}
+.seq .local .where {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--actor-a);
+  letter-spacing: 0.05em;
+}
+.seq .local.of-b .where { color: var(--actor-b); }
+.seq .local .card-title { margin: 0.2rem 0 0.3rem; font-weight: 600; }
+.seq .local ol, .seq .local ul { margin: 0 0 0.4rem; padding-left: 1.25rem; font-size: 0.85rem; }
+.seq .local .note { font-size: 0.8rem; color: var(--muted); margin: 0; }
+
+/* 원문 접기 — 요지는 카드에, 원문(JSON·로그)은 접어서 보존 */
+details.rawbox { margin-top: 0.6rem; border-top: 1px dashed var(--border); padding-top: 0.4rem; }
+details.rawbox summary {
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--muted);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+details.rawbox summary::before { content: "▸"; }
+details.rawbox[open] summary::before { content: "▾"; }
+details.rawbox summary:hover { color: var(--fg); }
+details.rawbox pre {
+  margin: 0.6rem 0 0.1rem;
+  font-size: 0.72rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* 경계 스트립 — 시퀀스의 시작/끝이 어디에 접하는지 */
+.seq .edge {
+  margin: 1.75rem 0 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.seq .edge .pill {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 12px;
+  background: var(--surface);
+}
+.seq .edge .rule { flex: 1; border-top: 1px solid var(--border); }
+
+/* 요점 카드 그리드 — 다이어그램이 말하는 것들로 마무리 */
+.keys-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 0.75rem 0; }
+.key {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.8rem 1rem;
+}
+.key .card-title { margin: 0 0 0.3rem; font-weight: 600; font-size: 0.9rem; }
+.key p { margin: 0; font-size: 0.85rem; color: var(--muted); }
+.key p b { color: var(--fg); }
+
+@media (max-width: 640px) {
+  .seq::before { left: 2%; }
+  .seq::after { right: 2%; }
+  .wire { margin-left: 2%; margin-right: 2%; }
+  .seq .payload { margin-left: 4%; margin-right: 4%; }
+  .seq .local { margin-left: 2%; margin-right: 4%; }
+  .seq .actor { max-width: 49%; padding: 0.45rem 0.7rem; }
+  .seq .actor .desc { display: none; }
+}
+/* ═══════ 시퀀스 패턴 CSS:END ═══════ */
+</style>
+</head>
+<body>
+<button id="theme-toggle" type="button" aria-label="테마 전환"></button>
+<div class="layout">
+<nav id="toc" aria-label="목차">
+  <div class="toc-title">목차</div>
+  <ol id="toc-list"></ol>
+</nav>
+<main>
+<header>
+  <h1>fdc-agent-be — API 레퍼런스 <span class="badge">v0.1</span></h1>
+  <p class="doc-meta">작성 2026-07-30 · 상태 초안 · 진실원 = <code>src/main/java/fdc/agent</code> 코드 (계약 변경 시 이 문서를 함께 갱신)</p>
+  <details class="revlog">
+    <summary>개정 로그</summary>
+    <ul>
+      <li><b>v0.1</b> (2026-07-30) — 최초 작성. 컨트롤러 4종 + chat 계약(스냅샷 세 상태·queryKey·SSE) 코드 기준 정리.</li>
+    </ul>
+  </details>
+</header>
+
+<section>
+  <h2 id="summary">0. 한 줄 요약</h2>
+  <p>이 서버의 HTTP 표면은 <b>네 개가 전부</b>다 — 헬스체크, 스킬 카탈로그, 라인 목록,
+  그리고 채팅(SSE). 채팅 하나가 계약의 본체이고, 그 안의 데이터 조달 왕복
+  (<code>dataRequests</code> ↔ <code>dataSnapshots</code>, <code>inputRequests</code> ↔
+  <code>inputs</code>)이 이 문서에서 가장 공들여 읽어야 할 부분이다. 서버는
+  <mark>무상태</mark>다 — 진행 상태를 저장하지 않고, 매 요청에 실려 온 스냅샷에서
+  "어디까지 왔나"를 유도한다.</p>
+  <p>FE 관점의 계약 문서는 demo-fe 레포의 <code>API.md</code>에 따로 있다. 그쪽은 FE mock
+  라우트까지 포함한 넓은 표면을 다루고, 이 문서는 <b>이 서버가 실제로 구현한 것</b>만
+  다룬다.</p>
+</section>
+
+<section>
+  <h2 id="conventions">1. 공통 규약</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>항목</th><th>값</th><th>비고</th></tr></thead>
+      <tbody>
+        <tr><td>버전 prefix</td><td><code>/api/fdc/v1</code></td><td><code>/health</code>만 예외</td></tr>
+        <tr><td>요청/응답 본문</td><td>JSON (UTF-8)</td><td>chat 성공 응답만 <code>text/event-stream</code></td></tr>
+        <tr><td>인증</td><td>없음 (도입 미정)</td><td>사내망·FE 프록시 뒤 전제</td></tr>
+        <tr><td>미지 필드</td><td>무시</td><td>계약은 느슨하게 수용 — 빠진 필드는 null</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3 id="conventions-headers">공통 응답 헤더</h3>
+  <p>모든 응답(2xx/4xx/5xx)에 두 헤더가 실린다 — <code class="cite">config/RequestIdFilter.java:30-36</code>.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>헤더</th><th>값</th><th>의미</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>x-request-id</code></td>
+          <td>클라이언트가 준 값 그대로, 없으면 <code>req_&lt;uuid&gt;</code> 생성</td>
+          <td>요청 추적 키. MDC로 서버 로그에도 같은 값이 박혀 로그 대조가 된다</td>
+        </tr>
+        <tr>
+          <td><code>x-fdc-data-source</code></td>
+          <td><code>fixture</code>(기본) 등 배포 설정값</td>
+          <td>지금 답의 스킬 조회 데이터가 어디서 왔는지 — <code class="cite">config/AppProps.java:13</code></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2 id="surface">2. 엔드포인트 한눈에</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>메서드·경로</th><th>용도</th><th>구현</th></tr></thead>
+      <tbody>
+        <tr><td><code>GET /health</code></td><td>살아있음 확인</td><td><code class="cite">api/HealthController.java</code></td></tr>
+        <tr><td><code>GET /api/fdc/v1/skills</code></td><td>사람이 고를 스킬 카탈로그</td><td><code class="cite">api/SkillsController.java</code></td></tr>
+        <tr><td><code>GET /api/fdc/v1/lines</code></td><td>설비가 속할 라인 목록</td><td><code class="cite">api/LinesController.java</code></td></tr>
+        <tr><td><code>POST /api/fdc/v1/chat</code></td><td>채팅 — SSE 스트림(token* → done | error)</td><td><code class="cite">api/ChatController.java</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>demo-fe <code>API.md</code>에 있는 <code>/summary</code>·<code>/upload</code>·<code>/equipment/*</code>는
+  FE mock 전용이다 — 이 서버 위에 무언가를 만들 때는 위 네 개만 있다고 보면 된다.</p>
+</section>
+
+<section>
+  <h2 id="health">3. GET /health</h2>
+  <pre><code>200 OK
+{"status":"ok"}</code></pre>
+</section>
+
+<section>
+  <h2 id="skills">4. GET /api/fdc/v1/skills</h2>
+  <p>사람이 고를 수 있는 스킬 목록. 채팅이 툴로 컴파일해 쓰는 것과 <b>같은 spec</b>을
+  편다(출처는 <code>SkillSource</code> — akg 허브가 붙어 있으면 허브, 아니면 classpath
+  번들). FE의 "설비 추가" 진입이 이 응답으로 입력 카드·데이터 요청 카드를 세운다 —
+  <code class="cite">api/SkillsController.java:14-19</code>.</p>
+
+  <pre><code>200 OK
+{
+  "skills": [
+    {
+      "skill": "fdc_explain_sensor",      // 툴 이름(언더스코어) — inputs[skill][key] 회신 키
+      "name": "fdc-explain-sensor",       // spec 이름(케밥)
+      "unit": "설비",
+      "focus": "센서 상태 해설",
+      "description": "…",                 // 합성 라우팅 문장 — 화면에선 부연으로만
+      "argumentHint": "…",                // 선택
+      "anchorTable": "…",                 // 선택
+      "inputs": [ { "key": "snsr_id", "required": true, "description": "…" } ],
+      "steps": [
+        {
+          "title": "…",
+          "produces": "…",                // 선택
+          "sql": "SELECT … WHERE id = :snsr_id",  // :var 가 남은 미완성 SQL
+          "argBinds": { "snsr_id": "snsr_id" },   // bind 이름 → 스킬 인자 이름
+          "priorStepBinds": []                    // 앞 스텝 결과에서 오는 bind
+        }
+      ]
+    }
+  ]
+}</code></pre>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>필드</th><th>의미</th></tr></thead>
+      <tbody>
+        <tr><td><code>skill</code></td><td>툴 이름(언더스코어). <code>InputRequest.skill</code>과 같은 값 — 여기서 만든 입력 카드의 회신 <code>inputs[skill][key]</code>가 곧장 들어맞는다</td></tr>
+        <tr><td><code>inputs[]</code></td><td>스킬 인자 = FE 입력 카드 하나(아직 값이 없다면). <code>required</code>가 있는 것부터 채운다</td></tr>
+        <tr><td><code>steps[].sql</code></td><td>bind 자리가 <code>:var</code>로 남은 <b>미완성</b> SQL. <code>argBinds</code>로 사용자가 채운 값을 메운다</td></tr>
+        <tr><td><code>steps[].priorStepBinds</code></td><td>이 bind는 <b>앞 스텝 결과</b>에서 온다 — FE가 채울 수 없으니 그 카드는 "앞 조회가 먼저"라고 알린다</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2 id="lines">5. GET /api/fdc/v1/lines</h2>
+  <p>설비 등록 폼의 라인 드롭다운용. 진실원은 akg의 <code>fab-line</code> 문서 집합이고
+  이 라우트는 그걸 브라우저가 닿는 자리로 옮겨 놓을 뿐이다(브라우저가 akg 주소·토큰을
+  알 이유가 없다) — <code class="cite">api/LinesController.java:9-18</code>.</p>
+  <pre><code>200 OK
+{"lines": ["L1", "L2", …]}</code></pre>
+  <p>akg에서 못 받으면 <b>200 + 빈 배열</b>이다. 라인은 필수가 아니라서 폼이 그 칸만 안
+  그리면 되고, 라인 하나 때문에 설비 등록이 막히면 안 되기 때문이다.</p>
+</section>
+
+<section>
+  <h2 id="chat">6. POST /api/fdc/v1/chat</h2>
+  <p>계약의 본체. 에이전트 실행(툴 조회 포함)은 <b>스트리밍 시작 전에</b> 끝난다 —
+  실패하면 아직 헤더를 안 보냈으므로 정상 HTTP 상태로 에러를 낼 수 있고, 성공하면
+  최종 텍스트를 code point 단위 <code>token</code> 이벤트로 흘린 뒤 구조화 데이터를
+  <code>done</code>에 번들한다 — <code class="cite">api/ChatController.java:26-32</code>.</p>
+
+  <h3 id="chat-request">6.1 요청 본문</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>필드</th><th>타입</th><th>의미</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>messages</code> <b>(필수)</b></td>
+          <td><code>{role, content}[]</code></td>
+          <td>대화 히스토리, 최근이 끝. <code>role</code> = <code>user | assistant | system | tool</code>(소문자)</td>
+        </tr>
+        <tr>
+          <td><code>dataSnapshots</code></td>
+          <td><code>ChatDataSnapshot[]</code></td>
+          <td>사용자가 붙여넣어 등록한 조회 결과 중 동봉으로 켠 것 — §6.2</td>
+        </tr>
+        <tr>
+          <td><code>inputs</code></td>
+          <td><code>{skill: {key: value}}</code></td>
+          <td>입력 카드 회신 스칼라 값. 스킬(언더스코어 툴 이름)로 네임스페이스 — 같은 key를 쓰는 스킬끼리 충돌하지 않는다</td>
+        </tr>
+        <tr>
+          <td><code>scope</code></td>
+          <td><code>{equipments?, analyses?}</code></td>
+          <td>이 질문이 <b>무엇을 놓고 하는</b> 질문인지 — 질의 대상 트레이. 설비 통째(<code>equipments[]</code>)와 분석 카드(<code>analyses[]</code>: <code>{id, equipment, skill, focus, inputs}</code>)가 섞여 산다. 없으면 대화 맥락 전체를 본다</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>입력 한도 — 위반 시 400 (<code class="cite">api/ChatController.java:39-41</code>):</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>항목</th><th>한도</th><th>에러 코드</th></tr></thead>
+      <tbody>
+        <tr><td><code>messages</code> 길이</td><td>≤ 100</td><td><code>messages_too_many</code></td></tr>
+        <tr><td>메시지당 <code>content</code></td><td>≤ 10,000자</td><td><code>message_content_too_long</code></td></tr>
+        <tr><td><code>messages</code> 자체</td><td>비면 안 됨</td><td><code>messages_required</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3 id="chat-snapshots">6.2 dataSnapshots — 스냅샷의 세 상태</h3>
+  <p>스냅샷 한 건 = <code>{queryKey, label, capturedAt, columns, rowCount, rows}</code>.
+  cell 은 원문 NULL을 뜻하는 <code>null</code>을 담을 수 있다(<code>(string|null)[][]</code>).
+  계약의 핵심은 <b>세 상태의 구분</b>이다 — <code class="cite">contract/ChatDataSnapshot.java:10-25</code>:</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>상태</th><th>판정</th><th>의미 · 서버의 행동</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>내용 동봉</td>
+          <td><code>rows</code>가 있고 비지 않음</td>
+          <td>임시 DB로 적재돼 <code>query_snapshot</code> 도구로 닿는다. 절차는 다음 단계로 진행</td>
+        </tr>
+        <tr>
+          <td>0행 확인</td>
+          <td><code>rows: []</code> (또는 rows 없이 <code>rowCount: 0</code>)</td>
+          <td><b>조회했더니 없었다는 사실.</b> "그 데이터는 없다"는 답의 근거가 되고, 그 조회 절차는 거기서 정상 종료된다</td>
+        </tr>
+        <tr>
+          <td>카탈로그만</td>
+          <td>rows도 rowCount 판정도 없음</td>
+          <td>"이런 표가 있다"만 알린 것 — 아직 안 왔으므로 다시 요청할 수 있다</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>재요청 억제의 기준은 <mark>도착했는가</mark>(내용이 있든 0행이든)이다. 0행과 미첨부를
+  뭉개면, 없음을 확인한 사용자에게 같은 요청이 또 나가거나 모델이 오지 않을 데이터를
+  기다리게 된다.</p>
+
+  <h3 id="chat-sse">6.3 응답 — SSE 이벤트 3종</h3>
+  <pre><code>200 OK
+Content-Type: text/event-stream; charset=utf-8
+
+event: token
+data: {"content":"분"}          ← code point 단위, 답변 길이에 맞춰 간격 자동 조절
+
+event: done                      ← 마지막 1회, 구조화 데이터 번들
+data: {"messageId":"msg_…","finishReason":"stop", …}
+
+event: error                     ← 스트림 도중 실패 시 1회 (이미 200이라 상태 변경 불가)
+data: {"message":"stream error"}</code></pre>
+
+  <p><code>done</code> 페이로드 — 비는 필드는 JSON에서 생략된다
+  (<code class="cite">contract/ChatDonePayload.java</code>):</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>필드</th><th>타입</th><th>의미</th></tr></thead>
+      <tbody>
+        <tr><td><code>messageId</code></td><td>string</td><td><code>msg_&lt;ts36&gt;</code></td></tr>
+        <tr><td><code>finishReason</code></td><td><code>"stop" | "length"</code></td><td>턴 종료 사유</td></tr>
+        <tr><td><code>tables?</code></td><td><code>{title?, columns?, rows: object[]}[]</code></td><td>paired 표. <code>columns</code> 비면 FE가 첫 row 키로 추출</td></tr>
+        <tr><td><code>recommendQuestion?</code></td><td><code>string[]</code></td><td>추천 후속 질문</td></tr>
+        <tr><td><code>dataRequests?</code></td><td><code>{queryKey, label, sql?, columns?}[]</code></td><td>조달 요청 카드 — §6.4</td></tr>
+        <tr><td><code>inputRequests?</code></td><td><code>{skill, key, label, description?}[]</code></td><td>스칼라 값 입력 카드. 회신은 <code>inputs[skill][key]</code></td></tr>
+        <tr><td><code>images?</code></td><td><code>{label, dataUrl?, url?, alt?}[]</code></td><td>답에 딸린 그림 — 원격 주소·인라인 base64 둘 다</td></tr>
+        <tr><td><code>links?</code></td><td><code>{label, url, description?}[]</code></td><td>답이 가리키는 바깥 문서</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3 id="chat-procurement">6.4 조달 왕복 — dataRequests ↔ dataSnapshots</h3>
+  <p>BE가 DB에 붙지 못하는 환경에서, 모델이 지어내는 대신 사용자에게 조달을 요청하는
+  통로다. 요청 카드의 <code>queryKey</code>는 <b>BE가 만든다</b> —
+  <code>{스킬}#{단계}__{인자=값&amp;…}</code> 꼴로, run 이름표에 필수 인자 전량이 들어가
+  한 절차의 모든 단계가 같은 이름표를 단다. 그래서 도착한 스냅샷만 보고 "이 절차는 몇
+  단계까지 왔나"가 유도된다 — <code class="cite">chat/QueryKey.java:9-25</code>.</p>
+
+  <div class="seq" role="group" aria-label="FE와 BE 사이 조달 왕복 시퀀스">
+    <div class="actors">
+      <div class="actor a-a">
+        <div class="name">demo-fe</div>
+        <div class="desc">브라우저 · 스냅샷 보관과 재전송 책임</div>
+      </div>
+      <div class="actor a-b">
+        <div class="name">fdc-agent-be</div>
+        <div class="desc">무상태 · 진행은 스냅샷에서 유도</div>
+      </div>
+    </div>
+
+    <div class="edge"><span class="pill">시작</span><span class="rule"></span>
+      <span>사용자가 설비에 관해 질문 — 스킬의 조회 결과가 필요한 질문</span></div>
+
+    <div class="wire to-b"><div class="line"></div><div class="head"></div>
+      <div class="tag">#1 · 질문 <small>· POST /api/fdc/v1/chat</small></div></div>
+    <div class="payload">
+      <p class="card-title">질문 — 아직 데이터 없음</p>
+      <div class="stack">
+        <div class="msg from-a"><span class="chip a">FE</span>
+          <span class="gist"><code>{"messages":[…], "scope":{…}}</code>
+          <span class="ann">스냅샷 미동봉 — 첫 턴</span></span></div>
+      </div>
+    </div>
+
+    <div class="local of-b">
+      <div class="where">BE 내부</div>
+      <p class="card-title">스킬 spec에서 조달 카드 생성</p>
+      <ol>
+        <li>LLM 툴 루프 — 스킬 선택, 필요한 조회 식별</li>
+        <li><code>queryKey = fdc-explain-sensor#0__snsr_id=S-0004</code> 발급 (BE 생성)</li>
+      </ol>
+      <p class="note">SQL은 spec의 것 — 모델이 자유 저작하지 않는다.</p>
+    </div>
+
+    <div class="wire to-a"><div class="line"></div><div class="head"></div>
+      <div class="tag">#1 · 응답 <small>· token* + done</small></div></div>
+    <div class="payload">
+      <p class="card-title">조달 요청 카드</p>
+      <div class="stack">
+        <div class="msg from-b"><span class="chip b">BE</span>
+          <span class="gist"><code>done.dataRequests: [{queryKey, label, sql, columns}]</code>
+          <span class="ann">FE가 요청 카드로 렌더 — SQL 복사 버튼 제공</span></span></div>
+      </div>
+    </div>
+
+    <div class="local">
+      <div class="where">FE 쪽 — 사람 손</div>
+      <p class="card-title">사용자가 사내에서 SQL 실행 → 결과 등록</p>
+      <ul>
+        <li>결과 붙여넣기 → 스냅샷이 그 <code>queryKey</code>로 등록 (동봉 ON)</li>
+        <li>결과가 없으면 "결과 없음"으로 등록 → <code>rows: []</code></li>
+      </ul>
+    </div>
+
+    <div class="wire to-b"><div class="line"></div><div class="head"></div>
+      <div class="tag">#2 · 재요청 <small>· POST (스냅샷 동봉)</small></div></div>
+    <div class="payload">
+      <p class="card-title">같은 질문 + 도착한 데이터</p>
+      <div class="stack">
+        <div class="msg from-a"><span class="chip a">FE</span>
+          <span class="gist"><code>{"messages":[…], "dataSnapshots":[{queryKey, columns, rows}]}</code>
+          <span class="ann">등록된 스냅샷 전량 재전송 — 진행 판정의 유일한 근거</span></span></div>
+      </div>
+    </div>
+
+    <div class="local of-b">
+      <div class="where">BE 내부</div>
+      <p class="card-title">도착 판정 → 진행 유도</p>
+      <ol>
+        <li>스냅샷을 임시 DB에 적재, queryKey를 다시 만들어 대조</li>
+        <li>다음 단계 바인드가 준비됐으면 다음 카드, 전부 도착이면 최종 서술</li>
+        <li>0행이면 그 절차는 정상 종료 — "그 조건으로는 데이터가 없다"</li>
+      </ol>
+    </div>
+
+    <div class="wire to-a"><div class="line"></div><div class="head"></div>
+      <div class="tag">#2 · 응답 <small>· token* + done</small></div></div>
+    <div class="payload">
+      <p class="card-title">다음 카드 또는 완주 답변</p>
+      <p class="note">남은 단계가 있으면 <b>같은 왕복이 반복</b>된다 — 카드가 더 안 나오면 완주.</p>
+    </div>
+
+    <div class="edge"><span class="pill">끝</span><span class="rule"></span>
+      <span>모든 단계 도착 → 데이터를 근거로 한 최종 서술</span></div>
+  </div>
+
+  <div class="keys-grid">
+    <div class="key">
+      <p class="card-title">queryKey는 BE가 만든다</p>
+      <p><code>{스킬}#{단계}__{인자}</code>. 키가 안정적이어서 <b>재요청 억제가 정확 일치로
+      동작</b>하고, 키 자체가 진행 상태를 들고 있다.</p>
+    </div>
+    <div class="key">
+      <p class="card-title">서버는 무상태</p>
+      <p>진행을 저장하지 않는다. 그래서 FE는 등록된 스냅샷을 <b>매 요청 전량 재전송</b>해야
+      한다 — 빠뜨린 스냅샷은 "안 도착"으로 보인다.</p>
+    </div>
+    <div class="key">
+      <p class="card-title">0행도 도착이다</p>
+      <p>없음을 확인한 것과 아직 안 온 것은 다르다. 0행은 답의 근거가 되고 재요청을
+      멈춘다.</p>
+    </div>
+    <div class="key">
+      <p class="card-title">스냅샷 내용은 데이터지 지시가 아니다</p>
+      <p>사용자가 붙여넣은 임의 텍스트가 들어오는 자리 — 그 안의 문장을 프롬프트 지시로
+      해석하지 않는다.</p>
+    </div>
+  </div>
+
+  <h3 id="chat-errors">6.5 chat 의 에러 경로</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>시점</th><th>형태</th><th>예</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>검증 실패 (스트림 전)</td>
+          <td>400 + JSON</td>
+          <td><code>{"error":"messages_too_many","limit":100,"actual":120}</code></td>
+        </tr>
+        <tr>
+          <td>에이전트 실행 실패 (스트림 전)</td>
+          <td>4xx/500 + JSON</td>
+          <td><code>{"error":"chat_failed","message":"…"}</code> — prod에서는 메시지 마스킹</td>
+        </tr>
+        <tr>
+          <td>스트림 도중 실패</td>
+          <td>SSE <code>event: error</code></td>
+          <td><code>{"message":"stream error"}</code> — 이미 200이라 상태 변경 불가, 상세는 서버 로그에만</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2 id="errors">7. 에러 형식</h2>
+  <p>모든 4xx/5xx는 <code>application/json</code>으로 다음 꼴이다 —
+  <code class="cite">config/ApiExceptionHandler.java</code>:</p>
+  <pre><code>{
+  "error": "코드",        // machine-readable
+  "message": "…",         // 선택 — prod의 500은 "internal error"로 마스킹
+  "limit": 100,           // 한도 위반일 때만
+  "actual": 120
+}</code></pre>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>코드</th><th>HTTP</th><th>언제</th></tr></thead>
+      <tbody>
+        <tr><td><code>invalid_json</code></td><td>400</td><td>본문 파싱 실패</td></tr>
+        <tr><td><code>messages_required</code></td><td>400</td><td>chat — <code>messages</code> 누락/빈 배열</td></tr>
+        <tr><td><code>messages_too_many</code></td><td>400</td><td>chat — 100개 초과</td></tr>
+        <tr><td><code>message_content_too_long</code></td><td>400</td><td>chat — 10,000자 초과</td></tr>
+        <tr><td><code>not_found</code></td><td>404</td><td>없는 경로</td></tr>
+        <tr><td><code>chat_failed</code></td><td>4xx/500</td><td>chat — 에이전트 실행 실패(스트림 시작 전)</td></tr>
+        <tr><td><code>internal</code></td><td>500</td><td>그 외 서버 오류</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>prod(<code>fdc.env=production</code>)에서 500의 <code>message</code>는
+  <code>"internal error"</code>로 고정된다 — 상세는 같은 <code>x-request-id</code>의 서버
+  로그에서.</p>
+</section>
+
+<section>
+  <h2 id="references">8. 관련 문서</h2>
+  <ul>
+    <li><code>docs/chat-sequence.html</code> — 채팅 한 턴의 내부 처리까지 편 상세 시퀀스</li>
+    <li>demo-fe <code>API.md</code> — FE 관점 계약(FE mock 전용 라우트 포함)</li>
+    <li><code>ARCHITECTURE.md</code> — 서버 구조와 wiring</li>
+  </ul>
+</section>
+</main>
+</div>
+<script>
+(function () {
+  "use strict";
+  var root = document.documentElement;
+  var KEY = "html-doc-theme";
+
+  // 테마: 저장된 수동 선택 복원 → 토글은 현재 실효 테마의 반대로
+  var saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) { /* file:// 제약 등 — 무시 */ }
+  if (saved === "light" || saved === "dark") root.setAttribute("data-theme", saved);
+  var btn = document.getElementById("theme-toggle");
+  function effective() {
+    return root.getAttribute("data-theme") ||
+      (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  }
+  function paint() { btn.textContent = effective() === "dark" ? "라이트 ☀" : "다크 ☾"; }
+  btn.addEventListener("click", function () {
+    var next = effective() === "dark" ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem(KEY, next); } catch (e) { /* 무시 */ }
+    paint();
+  });
+  paint();
+
+  // TOC: main의 h2/h3(id 필수 — check.mjs가 강제)로 평면 리스트 생성
+  var headings = Array.prototype.slice.call(
+    document.querySelectorAll("main h2[id], main h3[id]"));
+  var list = document.getElementById("toc-list");
+  var linkFor = {};
+  headings.forEach(function (h) {
+    var li = document.createElement("li");
+    li.className = "toc-" + h.tagName.toLowerCase();
+    var a = document.createElement("a");
+    a.href = "#" + h.id;
+    a.textContent = h.textContent;
+    li.appendChild(a);
+    list.appendChild(li);
+    linkFor[h.id] = a;
+  });
+
+  // 현재 섹션 하이라이트
+  if ("IntersectionObserver" in window) {
+    var obs = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (!e.isIntersecting) return;
+        Object.keys(linkFor).forEach(function (id) {
+          linkFor[id].classList.remove("active");
+        });
+        linkFor[e.target.id].classList.add("active");
+      });
+    }, { rootMargin: "0px 0px -70% 0px" });
+    headings.forEach(function (h) { obs.observe(h); });
+  }
+
+  // 헤딩 앵커(§) — TOC 생성 뒤에 붙인다(TOC 라벨에 § 섞임 방지)
+  headings.forEach(function (h) {
+    var a = document.createElement("a");
+    a.className = "hanchor";
+    a.href = "#" + h.id;
+    a.textContent = "§";
+    h.appendChild(a);
+  });
+})();
+</script>
+</body>
+</html>
