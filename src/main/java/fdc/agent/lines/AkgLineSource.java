@@ -70,6 +70,19 @@ public final class AkgLineSource implements LineSource {
         return snapshot == null ? List.of() : snapshot;
     }
 
+    /** 운영용 강제 리로드(#40) — {@link AkgSkillSource#reloadNow()} 와 같은 규율. */
+    public boolean reloadNow() {
+        if (!refreshing.compareAndSet(false, true)) {
+            return false;
+        }
+        try {
+            refresh();
+            return true;
+        } finally {
+            refreshing.set(false);
+        }
+    }
+
     private void refresh() {
         lastAttemptMs = System.currentTimeMillis();
         try {

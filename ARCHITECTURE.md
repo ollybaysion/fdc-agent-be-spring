@@ -138,9 +138,13 @@ BE 가 DB 에 닿지 못하는 배포에서는 조회가 왕복이 된다: 요�
 ### HTTP 표면 · 문서 포인터
 
 - `GET /health`
+- `POST /admin/reload` — akg 소스(스킬·라인) 강제 리로드. 운영 표면이라 제품
+  문법 밖(`/health` 층). akg 미구성이면 `reloaded:false` 로 보고만 한다.
 - `POST /api/fdc/v1/chat` — SSE `token* → done | error`. 에이전트 실행은
   스트리밍 전 완료(실패는 정상 HTTP 에러로).
 - `GET /api/fdc/v1/skills` — 사람이 고르는 스킬 카탈로그(로드된 spec 목록).
+- `GET /api/fdc/v1/lines` — 설비 카드 라인 드롭다운 목록(akg `fab-line`,
+  미구성이면 빈 목록).
 - 데이터를 돌려주는 정형 조회 GET 은 없다. 설비·챔버·센서를 포함해 **모든 데이터는
   스킬 툴로 조회하거나, 닿지 않으면 `dataRequests` 로 사용자에게 조달을 요청**한다.
   조달 요청도 등재된 스킬 spec 의 조회만 나간다(임의 SQL 없음).

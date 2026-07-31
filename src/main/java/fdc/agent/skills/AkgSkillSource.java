@@ -82,6 +82,23 @@ public final class AkgSkillSource implements SkillSource {
         return snapshot.values().stream().map(Cached::spec).toList();
     }
 
+    /**
+     * 운영용 강제 리로드(#40) — refresh 주기와 무관하게 즉시 1회 재확인한다.
+     * 동시 refresh 가 진행 중이면 건너뛰고 false — 그쪽이 이미 최신을 가져온다.
+     * 실패 정책은 주기 refresh 와 동일(fail-open, 기존 스냅샷 유지).
+     */
+    public boolean reloadNow() {
+        if (!refreshing.compareAndSet(false, true)) {
+            return false;
+        }
+        try {
+            refresh();
+            return true;
+        } finally {
+            refreshing.set(false);
+        }
+    }
+
     private void refresh() {
         lastAttemptMs = System.currentTimeMillis();
         try {
