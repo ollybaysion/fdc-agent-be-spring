@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import fdc.agent.chat.PanelJudge.PanelBody;
 import fdc.agent.chat.PanelJudge.Verdict;
+import fdc.agent.contract.BranchDecision;
 import fdc.agent.contract.ChatDataSnapshot;
 import fdc.agent.contract.PanelEvent;
 import fdc.agent.contract.RunDecl;
@@ -48,7 +49,7 @@ class PanelJudgeTest {
     private static PanelBody body(
             PanelEvent event, List<SnapshotIndexEntry> index, List<ChatDataSnapshot> snapshots,
             List<RunDecl> runs) {
-        return new PanelBody("e1", 1, event, null, index, snapshots, runs, null, null);
+        return new PanelBody("e1", 1, event, null, index, snapshots, runs, null, null, null);
     }
 
     private static List<RunDecl> declared() {
@@ -190,5 +191,139 @@ class PanelJudgeTest {
                 new PanelEvent("snapshot-registered", "자유-저작-키"), null,
                 List.of(step0("2026-08-01T00:00", List.of())), declared()));
         assertThat(strangeKey.narration()).isNull();
+    }
+
+    // ── 분기 갈림길 (#55) ────────────────────────────────────────────────────
+
+    private static final String KEYB0 = "t-branch#0__id=X-1";
+
+    /**
+     * 분기 스킬 — 1단계(집계, 항상 1행)에 종료형·열림형 분기가 하나씩. 3단계는
+     * 열림형의 대상이라 잠김 출생이고, 2·3단계 바인드는 인자만이라 게이트가 없다면
+     * 즉시 카드가 될 수 있는 모양이다.
+     */
+    private static SkillSpec branched() {
+        return new SkillSpec("t-branch", null, null, null, null, null,
+                List.of(new SkillSpec.SkillInput("id", true, "조회 키")),
+                null,
+                List.of(
+                        new SkillSpec.SkillStep("1단계 — 집계", null, null, null,
+                                "SELECT COUNT(*) AS CNT FROM t0 WHERE id = :id",
+                                Map.of("id", new SkillSpec.BindSource("arg", "id", null, null)),
+                                List.of(
+                                        new SkillSpec.SkillBranch("CNT = 0", "종료하고 없다로 답한다", null),
+                                        new SkillSpec.SkillBranch("이탈이 유의미하면", "상세를 본다", 2)),
+                                null),
+                        new SkillSpec.SkillStep("2단계 — 기본", null, null, null,
+                                "SELECT X FROM t1 WHERE id = :id",
+                                Map.of("id", new SkillSpec.BindSource("arg", "id", null, null)),
+                                null, null),
+                        new SkillSpec.SkillStep("3단계 — 상세(조건부)", null, null, null,
+                                "SELECT Y FROM t2 WHERE id = :id",
+                                Map.of("id", new SkillSpec.BindSource("arg", "id", null, null)),
+                                null, null)),
+                null, null);
+    }
+
+    private static QueryPool branchedPool() {
+        return QueryPool.of(List.of(branched()));
+    }
+
+    private static PanelBody branchBody(
+            PanelEvent event, List<ChatDataSnapshot> snapshots, List<BranchDecision> decisions) {
+        return new PanelBody("e1", 1, event, null, null, snapshots,
+                List.of(new RunDecl("t-branch", Map.of("id", "X-1"))), null, null, decisions);
+    }
+
+    private static ChatDataSnapshot aggregate(String cnt) {
+        return new ChatDataSnapshot(KEYB0, "1단계", "2026-08-03T00:00",
+                List.of("CNT"), 1, List.of(List.of(cnt)));
+    }
+
+    private static ChatDataSnapshot basicStep() {
+        return new ChatDataSnapshot("t-branch#1__id=X-1", "2단계", "2026-08-03T00:01",
+                List.of("X"), 1, List.of(List.of("x")));
+    }
+
+    @Test
+    void 조건부_스텝은_잠김_출생이라_판정_사실_없이는_절차_밖이다() {
+        // 1·2단계만 밟을 수 있다 — 3단계(열림형 대상)는 판정 사실이 없으면 절차 밖이라
+        // 둘이 도착한 순간 종결이다.
+        Verdict v = PanelJudge.judge(branchedPool(),
+                branchBody(null, List.of(aggregate("5"), basicStep()), null));
+
+        RunProgress run = v.runsProgress().get(0);
+        assertThat(run.nextStep()).isEqualTo(-1);
+        assertThat(run.terminal()).isTrue();
+    }
+
+    @Test
+    void open_판정_사실이_조건부_스텝을_연다() {
+        Verdict v = PanelJudge.judge(branchedPool(), branchBody(null,
+                List.of(aggregate("5"), basicStep()),
+                List.of(new BranchDecision("t-branch", Map.of("id", "X-1"), 0, "open", 1, null))));
+
+        RunProgress run = v.runsProgress().get(0);
+        assertThat(run.nextStep()).isEqualTo(2);
+        assertThat(run.terminal()).isFalse();
+    }
+
+    @Test
+    void 분기_있는_스텝의_도착이_판정_질문을_선언한다() {
+        PanelEvent event = new PanelEvent("snapshot-registered", KEYB0);
+
+        Verdict fresh = PanelJudge.judge(branchedPool(),
+                branchBody(event, List.of(aggregate("0")), null));
+        assertThat(fresh.branchQuestion()).isNotNull();
+        assertThat(fresh.branchQuestion().skill()).isEqualTo("t-branch");
+        assertThat(fresh.branchQuestion().query().step()).isZero();
+        assertThat(fresh.branchQuestion().data().rows()).containsExactly(List.of("0"));
+
+        // 이미 그 스텝의 판정 사실이 있으면(재전송) 다시 묻지 않는다.
+        Verdict judged = PanelJudge.judge(branchedPool(), branchBody(event,
+                List.of(aggregate("0")),
+                List.of(new BranchDecision("t-branch", Map.of("id", "X-1"), 0, "open", 1, null))));
+        assertThat(judged.branchQuestion()).isNull();
+
+        // 0행 도착은 기존 결정론 종결 소관 — 분기 판정 대상이 아니다.
+        Verdict empty = PanelJudge.judge(branchedPool(), branchBody(event,
+                List.of(new ChatDataSnapshot(KEYB0, "1단계", "2026-08-03T00:00",
+                        List.of("CNT"), 0, List.of())),
+                null));
+        assertThat(empty.branchQuestion()).isNull();
+
+        // 이벤트가 없으면(재동기화 왕복) 묻지 않는다.
+        Verdict noEvent = PanelJudge.judge(branchedPool(),
+                branchBody(null, List.of(aggregate("0")), null));
+        assertThat(noEvent.branchQuestion()).isNull();
+    }
+
+    @Test
+    void stop_판정_재판정은_절차를_끝내고_분기_지시가_실린_서술을_낸다() {
+        BranchDecision stop = new BranchDecision(
+                "t-branch", Map.of("id", "X-1"), 0, "stop", 0, "CNT가 0건입니다.");
+        Verdict v = PanelJudge.judge(branchedPool(),
+                branchBody(new PanelEvent("snapshot-registered", KEYB0),
+                        List.of(aggregate("0")), null),
+                stop);
+
+        assertThat(v.branchQuestion()).isNull(); // 재판정 경로는 다시 묻지 않는다.
+        RunProgress run = v.runsProgress().get(0);
+        assertThat(run.terminal()).isTrue();
+        assertThat(v.terminalRuns()).containsExactly(run.label());
+        assertThat(v.narration()).isNotNull();
+        assertThat(v.narration().branchNote())
+                .contains("CNT = 0").contains("CNT가 0건입니다.").contains("종료하고 없다로 답한다");
+    }
+
+    @Test
+    void 저장된_stop_사실이_돌아오면_종결은_유지되고_서술은_다시_나지_않는다() {
+        // FE 가 카드에 저장해 되보낸 사실 — 이벤트 없는 재동기화에서 절차는 닫힌 채다.
+        Verdict v = PanelJudge.judge(branchedPool(), branchBody(null,
+                List.of(aggregate("0")),
+                List.of(new BranchDecision("t-branch", Map.of("id", "X-1"), 0, "stop", 0, null))));
+
+        assertThat(v.runsProgress().get(0).terminal()).isTrue();
+        assertThat(v.narration()).isNull();
     }
 }

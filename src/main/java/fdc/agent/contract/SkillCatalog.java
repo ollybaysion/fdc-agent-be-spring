@@ -61,7 +61,19 @@ public record SkillCatalog(List<Entry> skills) {
             String sql,
             Map<String, String> argBinds,
             List<String> priorStepBinds,
-            Map<String, Bind> binds) {
+            Map<String, Bind> binds,
+            @JsonInclude(JsonInclude.Include.NON_NULL) List<Branch> branches) {
+    }
+
+    /**
+     * 스텝의 분기 하나(#55) — {@code when} 산문 그대로, {@code opens} 가 있으면
+     * 열림형(그 0-기반 스텝은 잠김 출생 — FE 는 open 판정 사실 없이 그 스텝을
+     * 요청으로 그리지 않는다), 없으면 종료형.
+     */
+    public record Branch(
+            String when,
+            @JsonInclude(JsonInclude.Include.NON_NULL) String then,
+            @JsonInclude(JsonInclude.Include.NON_NULL) Integer opens) {
     }
 
     /** bind 하나의 배선 — from="arg" 면 {@code arg} 가, from="step" 이면 {@code step}+{@code column} 이 찬다. */

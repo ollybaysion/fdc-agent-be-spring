@@ -13,6 +13,10 @@ import java.util.List;
  * 낡은 응답을 버리는 근거다(T7). {@code poolRev} 는 스킬 풀 지문 — 풀이 시변이라
  * (akg 주기 refresh) 같은 body 가 다른 판정일 수 있음을 FE 가 감지한다(T14).
  * {@code narratedRun} 은 이 응답의 token 스트림이 어느 절차의 종결 서술인지다.
+ *
+ * <p>{@code branchDecisions} 는 분기 판정 사실 전체(#55) — body 로 온 저장분에
+ * 이번 요청에서 LLM 이 새로 내린 판정을 합친 것이다. FE 는 이걸 분석 카드에
+ * 저장하고 다음 요청 body 에 되보낸다(picks 와 같은 echo 규율).
  */
 public record ChatDataDone(
         String messageId,
@@ -21,5 +25,6 @@ public record ChatDataDone(
         String poolRev,
         List<RunProgress> runsProgress,
         @JsonInclude(JsonInclude.Include.NON_NULL) List<String> terminalRuns,
+        @JsonInclude(JsonInclude.Include.NON_NULL) List<BranchDecision> branchDecisions,
         @JsonInclude(JsonInclude.Include.NON_NULL) String narratedRun) {
 }

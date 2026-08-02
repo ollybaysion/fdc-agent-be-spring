@@ -55,9 +55,14 @@ public class SkillsController {
                             new SkillCatalog.Bind("step", null, src.step(), src.column()));
                 }
             }
+            List<SkillCatalog.Branch> branches = step.branches() == null ? null
+                    : step.branches().stream()
+                            .filter(b -> b != null && b.when() != null)
+                            .map(b -> new SkillCatalog.Branch(b.when(), b.then(), b.opens()))
+                            .toList();
             steps.add(new SkillCatalog.Step(
                     step.title(), step.produces(), step.sql(), argBinds, priorStepBinds,
-                    wiring));
+                    wiring, branches == null || branches.isEmpty() ? null : branches));
         }
 
         return new SkillCatalog.Entry(

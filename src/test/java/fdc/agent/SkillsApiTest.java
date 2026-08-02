@@ -110,4 +110,18 @@ class SkillsApiTest {
         assertThat(wired.path("column").asText()).isEqualTo("EQP_ID");
         assertThat(wired.has("arg")).isFalse();
     }
+
+    @Test
+    void 스텝의_분기가_거울로_내려간다() throws Exception {
+        // branches — FE 가 조건부 스텝(opens 대상 = 잠김 출생)을 파생하는 재료(#55).
+        JsonNode trace = byName(skills(), "fdc-trace-reading");
+        assertThat(trace).isNotNull();
+        JsonNode branch = trace.path("steps").get(0).path("branches").get(0);
+        assertThat(branch.path("when").asText()).isEqualTo("CNT = 0");
+        assertThat(branch.path("then").asText()).contains("측정이 없다");
+        assertThat(branch.has("opens")).isFalse(); // 종료형 — opens 없음.
+
+        // 분기 없는 스텝은 필드 자체가 없다.
+        assertThat(trace.path("steps").get(1).has("branches")).isFalse();
+    }
 }

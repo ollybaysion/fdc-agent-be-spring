@@ -1,6 +1,7 @@
 package fdc.agent.chat;
 
 import fdc.agent.chat.ChatAgent.HistoryMessage;
+import fdc.agent.contract.BranchDecision;
 import fdc.agent.contract.ChatDataSnapshot;
 import fdc.agent.contract.PanelEvent;
 import fdc.agent.contract.QueryScope;
@@ -8,10 +9,12 @@ import fdc.agent.contract.RunDecl;
 import fdc.agent.contract.RunProgress;
 import fdc.agent.contract.SnapshotIndexEntry;
 import fdc.agent.skills.QueryPool;
+import fdc.agent.skills.SkillSpec;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * panel-judge — 데이터 패널 상태의 <b>결정론 판정</b> (#38, {@code POST /chat/data} 의
@@ -45,15 +48,18 @@ public final class PanelJudge {
             List<ChatDataSnapshot> snapshots,
             List<RunDecl> runs,
             Map<String, Map<String, String>> inputs,
-            QueryScope scope) {
+            QueryScope scope,
+            List<BranchDecision> branchDecisions) {
     }
 
     /**
      * 종결 서술 지시 — run 정체와 도착 실물 전부. 판정기는 <b>무엇이 도착해 절차가
      * 끝났는가</b>만 내놓고, 문장(맥락 섹션) 합성은 {@link NarrationPrompt} 소관이다.
+     * {@code branchNote} 는 spec 분기(stop)가 절차를 끝낸 경우의 지시 한 줄 — 아니면 null.
      */
     public record Narration(
-            String runLabel, String skill, Map<String, String> args, List<StepArrival> steps) {
+            String runLabel, String skill, Map<String, String> args,
+            List<StepArrival> steps, String branchNote) {
     }
 
     /**
@@ -64,31 +70,116 @@ public final class PanelJudge {
             QueryPool.Query query, SnapshotIndexEntry hit, ChatDataSnapshot full) {
     }
 
-    /** 판정 결과 — 응답 페이로드의 재료 전부. */
+    /**
+     * 판정 결과 — 응답 페이로드의 재료 전부. {@code branchQuestion} 은 이번 이벤트가
+     * 분기 있는 스텝의 도착이라 LLM 판정이 필요하다는 선언 — 판정기는 결정론을
+     * 유지하고, 호출은 컨트롤러가 한다(#55, 종결 서술과 같은 분업).
+     */
     public record Verdict(
             List<RunProgress> runsProgress,
             List<String> terminalRuns,
-            Narration narration) {
+            Narration narration,
+            BranchQuestion branchQuestion) {
+    }
+
+    /** LLM 에 물을 분기 질문 하나 — 판정 본문({@link BranchPrompt}) 조립 재료 전부. */
+    public record BranchQuestion(
+            String skill, Map<String, String> args, String runLabel,
+            QueryPool.Query query, ChatDataSnapshot data) {
     }
 
     public static Verdict judge(QueryPool pool, PanelBody body) {
+        return judge(pool, body, null);
+    }
+
+    /**
+     * @param fresh 이번 요청에서 LLM 이 방금 내린 분기 판정 — 재판정 경로에서만
+     *     non-null. body 의 저장분과 합쳐 반영되고, stop 이면 이 판정이 끝낸 절차의
+     *     종결 서술이 나간다.
+     */
+    public static Verdict judge(QueryPool pool, PanelBody body, BranchDecision fresh) {
         Map<String, SnapshotIndexEntry> index = effectiveIndex(body);
         Map<String, ChatDataSnapshot> rows = rowsByKey(body, index);
+        Map<String, List<BranchDecision>> decisions = decisionsByRun(pool, body, fresh);
 
         List<RunSlot> slots = assembleRuns(pool, body, index);
 
         List<RunProgress> runsProgress = new ArrayList<>();
         List<String> terminalRuns = new ArrayList<>();
         for (RunSlot slot : slots) {
-            RunProgress progress = judgeRun(pool, slot, index);
+            RunProgress progress = judgeRun(pool, slot, index, decisionsOf(decisions, slot));
             runsProgress.add(progress);
             if (progress.terminal()) {
                 terminalRuns.add(progress.label());
             }
         }
 
-        Narration narration = narrationOf(pool, body, index, rows, slots);
-        return new Verdict(List.copyOf(runsProgress), List.copyOf(terminalRuns), narration);
+        Narration narration = narrationOf(pool, body, index, rows, slots, decisions, fresh);
+        BranchQuestion question = fresh != null ? null
+                : branchQuestionOf(pool, body, index, rows, slots, decisions);
+        return new Verdict(List.copyOf(runsProgress), List.copyOf(terminalRuns),
+                narration, question);
+    }
+
+    // ── 분기 판정 사실 ───────────────────────────────────────────────────────
+
+    /** run 이름표(skill + argsPart) → 그 run 의 판정 사실들. fresh 가 있으면 합친다. */
+    private static Map<String, List<BranchDecision>> decisionsByRun(
+            QueryPool pool, PanelBody body, BranchDecision fresh) {
+        Map<String, List<BranchDecision>> byRun = new LinkedHashMap<>();
+        List<BranchDecision> all = new ArrayList<>(
+                body.branchDecisions() != null ? body.branchDecisions() : List.of());
+        if (fresh != null) {
+            all.add(fresh);
+        }
+        for (BranchDecision d : all) {
+            if (d == null || d.skill() == null || (!d.isStop() && !d.isOpen())) {
+                continue;
+            }
+            QueryPool.Query first = pool.byId(d.skill().trim());
+            if (first == null) {
+                continue;
+            }
+            Map<String, String> args = d.args() != null ? d.args() : Map.of();
+            String key = first.skill() + " " + QueryKey.argsPart(args, first.requiredArgs());
+            byRun.computeIfAbsent(key, k -> new ArrayList<>()).add(d);
+        }
+        return byRun;
+    }
+
+    private static List<BranchDecision> decisionsOf(
+            Map<String, List<BranchDecision>> decisions, RunSlot slot) {
+        return decisions.getOrDefault(slot.skill() + " " + slot.argsPart(), List.of());
+    }
+
+    /**
+     * 이 run 에서 지금 밟을 수 있는 스텝인가 — 잠김 출생 스텝(어떤 분기의
+     * {@code opens} 대상)은 open 판정 사실이 있어야 하고, stop 판정 뒤의 스텝은
+     * 닫힌다. 판정 사실이 없으면 분기 없던 시절과 완전히 같다.
+     */
+    private static boolean reachable(
+            QueryPool.Query q, Set<Integer> gated, List<BranchDecision> decisions,
+            List<QueryPool.Query> steps) {
+        for (BranchDecision d : decisions) {
+            if (d.isStop() && q.step() > d.step()) {
+                return false;
+            }
+        }
+        if (!gated.contains(q.step())) {
+            return true;
+        }
+        for (BranchDecision d : decisions) {
+            if (!d.isOpen() || d.step() < 0 || d.step() >= steps.size()) {
+                continue;
+            }
+            List<fdc.agent.skills.SkillSpec.SkillBranch> branches = steps.get(d.step()).branches();
+            if (d.index() >= 0 && d.index() < branches.size()
+                    && branches.get(d.index()).opens() != null
+                    && branches.get(d.index()).opens() == q.step()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // ── 판정 집합 ────────────────────────────────────────────────────────────
@@ -208,7 +299,8 @@ public final class PanelJudge {
     // ── run 하나의 판정 ──────────────────────────────────────────────────────
 
     private static RunProgress judgeRun(
-            QueryPool pool, RunSlot slot, Map<String, SnapshotIndexEntry> index) {
+            QueryPool pool, RunSlot slot, Map<String, SnapshotIndexEntry> index,
+            List<BranchDecision> decisions) {
         List<QueryPool.Query> steps = pool.stepsOf(slot.skill());
         String label = label(slot);
         if (steps.isEmpty()) {
@@ -216,10 +308,17 @@ public final class PanelJudge {
                     List.of(new RunProgress.StepHold(slot.skill(), "등재되지 않은 스킬입니다.")));
         }
 
+        // 밟을 수 있는 스텝만 진행으로 센다 — 잠긴 조건부 스텝(open 사실 없음)과
+        // stop 뒤의 스텝은 절차 밖이다. 분기 판정 사실이 없으면 전 스텝 그대로다.
+        Set<Integer> gated = pool.gatedSteps(slot.skill());
+        List<QueryPool.Query> walkable = steps.stream()
+                .filter(q -> reachable(q, gated, decisions, steps))
+                .toList();
+
         int arrivedCount = 0;
         int nextStep = -1;
         Integer emptyAt = null;
-        for (QueryPool.Query q : steps) {
+        for (QueryPool.Query q : walkable) {
             SnapshotIndexEntry hit = index.get(stepKey(slot, q));
             boolean arrived = hit != null && hit.arrived();
             if (arrived) {
@@ -262,7 +361,8 @@ public final class PanelJudge {
     private static Narration narrationOf(
             QueryPool pool, PanelBody body,
             Map<String, SnapshotIndexEntry> index, Map<String, ChatDataSnapshot> rows,
-            List<RunSlot> slots) {
+            List<RunSlot> slots, Map<String, List<BranchDecision>> decisions,
+            BranchDecision fresh) {
         PanelEvent event = body.event();
         if (event == null || event.queryKey() == null || event.queryKey().isBlank()) {
             return null;
@@ -290,12 +390,19 @@ public final class PanelJudge {
             return null;
         }
 
+        // 종결 여부는 밟을 수 있는 스텝 기준이다 — stop 판정 뒤 스텝과 잠긴 조건부
+        // 스텝은 절차 밖이라, stop 이 절차를 끝냈으면 그 자체로 종결이다.
         List<QueryPool.Query> steps = pool.stepsOf(run.skill());
-        if (!terminalWith(steps, run, index, null) || terminalWith(steps, run, index, eventKey)) {
+        Set<Integer> gated = pool.gatedSteps(run.skill());
+        List<BranchDecision> runDecisions = decisionsOf(decisions, run);
+        List<QueryPool.Query> walkable = steps.stream()
+                .filter(q -> reachable(q, gated, runDecisions, steps))
+                .toList();
+        if (!terminalWith(walkable, run, index, null) || terminalWith(walkable, run, index, eventKey)) {
             return null; // 종결이 아니거나, 이 이벤트 없이도 종결이던 절차다.
         }
         List<StepArrival> arrivals = new ArrayList<>();
-        for (QueryPool.Query q : steps) {
+        for (QueryPool.Query q : walkable) {
             String key = stepKey(run, q);
             SnapshotIndexEntry hit = index.get(key);
             if (hit == null || !hit.arrived()) {
@@ -303,7 +410,72 @@ public final class PanelJudge {
             }
             arrivals.add(new StepArrival(q, hit, rows.get(key)));
         }
-        return new Narration(label(run), run.skill(), run.args(), List.copyOf(arrivals));
+        return new Narration(label(run), run.skill(), run.args(), List.copyOf(arrivals),
+                branchNote(steps, run, fresh));
+    }
+
+    /** 방금 stop 판정이 이 run 을 끝낸 경우의 서술 지시 — when·then·근거 한 줄. */
+    private static String branchNote(List<QueryPool.Query> steps, RunSlot run, BranchDecision fresh) {
+        if (fresh == null || !fresh.isStop() || !run.skill().equals(fresh.skill())
+                || fresh.step() < 0 || fresh.step() >= steps.size()) {
+            return null;
+        }
+        List<SkillSpec.SkillBranch> branches = steps.get(fresh.step()).branches();
+        if (fresh.index() < 0 || fresh.index() >= branches.size()) {
+            return null;
+        }
+        SkillSpec.SkillBranch branch = branches.get(fresh.index());
+        StringBuilder note = new StringBuilder("조건 \"").append(branch.when()).append("\" 성립");
+        if (fresh.reason() != null && !fresh.reason().isBlank()) {
+            note.append(" (").append(fresh.reason().trim()).append(")");
+        }
+        if (branch.then() != null && !branch.then().isBlank()) {
+            note.append(": ").append(branch.then().trim());
+        }
+        return note.toString();
+    }
+
+    /**
+     * 이번 이벤트가 분기 있는 스텝의 도착이면 LLM 에 물을 질문을 선언한다 — 이미
+     * 그 스텝의 판정 사실이 있으면(재전송·재판정) 묻지 않고, 행 실물이 안 실려
+     * 왔으면 표를 만들 수 없어 묻지 않는다(needsRows 규율과 별개의 보수).
+     */
+    private static BranchQuestion branchQuestionOf(
+            QueryPool pool, PanelBody body,
+            Map<String, SnapshotIndexEntry> index, Map<String, ChatDataSnapshot> rows,
+            List<RunSlot> slots, Map<String, List<BranchDecision>> decisions) {
+        PanelEvent event = body.event();
+        if (event == null || event.queryKey() == null || event.queryKey().isBlank()) {
+            return null;
+        }
+        String eventKey = event.queryKey().trim();
+        SnapshotIndexEntry arrived = index.get(eventKey);
+        if (arrived == null || !arrived.arrived() || arrived.isEmptyResult()) {
+            return null; // 0행 종결은 기존 결정론이 처리한다 — 분기 판정 대상이 아니다.
+        }
+        QueryKey.Parsed parsed = QueryKey.parse(eventKey);
+        QueryPool.Query eventQuery =
+                parsed == null ? null : pool.byId(parsed.skill() + "#" + parsed.step());
+        if (eventQuery == null || eventQuery.branches().isEmpty()) {
+            return null;
+        }
+        ChatDataSnapshot data = rows.get(eventKey);
+        if (data == null || !data.hasRows()) {
+            return null;
+        }
+        for (RunSlot slot : slots) {
+            if (!slot.skill().equals(eventQuery.skill())
+                    || !slot.argsPart().equals(parsed.argsPart())) {
+                continue;
+            }
+            boolean alreadyJudged = decisionsOf(decisions, slot).stream()
+                    .anyMatch(d -> d.step() == eventQuery.step());
+            if (alreadyJudged) {
+                return null;
+            }
+            return new BranchQuestion(slot.skill(), slot.args(), label(slot), eventQuery, data);
+        }
+        return null;
     }
 
     /** {@code without} 키를 미도착으로 치고 본 종결 여부. */

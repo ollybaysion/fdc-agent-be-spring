@@ -1,5 +1,6 @@
 package fdc.agent.llm;
 
+import fdc.agent.chat.BranchPrompt;
 import fdc.agent.chat.ChatPrompt;
 import fdc.agent.chat.DataRequestTool;
 import fdc.agent.chat.NarrationPrompt;
@@ -68,6 +69,11 @@ public class MockLlm implements LlmClient {
         // 바로 이 경로다(#38 T6). 감지는 문장이 아니라 지시 상수에 붙는다.
         if (question.contains(NarrationPrompt.NARRATE_INSTRUCTION)) {
             return new LlmTurn.Final(narration(contextSection(messages)));
+        }
+        // 분기 판정(/chat/data, #55) — 실 모델이 산문 조건을 뜻으로 평가할 자리를,
+        // 목은 "COL 연산자 숫자" 꼴 단순 비교로 흉내낸다. 산문뿐인 조건은 continue.
+        if (question.contains(BranchPrompt.SECTION_HEAD)) {
+            return new LlmTurn.Final(branchJudgment(question));
         }
         LlmToolCall call = planCall(question, contextSection(messages), tools);
         if (call != null) {
@@ -261,6 +267,86 @@ public class MockLlm implements LlmClient {
         return "요청하신 조회 절차가 완료됐습니다.\n" + String.join("\n", lines)
                 + "\n\n위 결과가 도착한 데이터의 전부입니다 — 값 전문은 데이터 패널에서 확인하세요. "
                 + "(온프렘 LLM 미설정 시 mock 서술)";
+    }
+
+    // 판정 본문의 분기 줄 — "0. 조건: CNT = 0 → 효과: 종료 — …".
+    private static final Pattern BRANCH_LINE =
+            Pattern.compile("(?m)^(\\d+)\\. 조건: (.*?) → 효과: (종료|열림)");
+    // 목이 평가할 수 있는 조건 꼴 — "COL 연산자 숫자". 산문 조건은 여기 안 걸린다.
+    private static final Pattern SIMPLE_CONDITION =
+            Pattern.compile("([A-Za-z_][A-Za-z0-9_]*)\\s*(>=|<=|==|=|>|<)\\s*(-?\\d+(?:\\.\\d+)?)");
+
+    /**
+     * 분기 판정 목 — 판정 본문의 markdown 표(첫 데이터 행)와 분기 목록을 읽어,
+     * 단순 비교 조건만 결정적으로 평가한다. 성립하면 효과 그대로(종료=stop,
+     * 열림=open), 아니면 continue — 실 모델의 보수 규칙과 같은 기본값이다.
+     */
+    private static String branchJudgment(String body) {
+        List<List<String>> table = mdTable(body);
+        Matcher branch = BRANCH_LINE.matcher(body);
+        while (branch.find()) {
+            Matcher cond = SIMPLE_CONDITION.matcher(branch.group(2));
+            if (!cond.find() || table.size() < 2) {
+                continue;
+            }
+            Double cell = numericCell(table, cond.group(1));
+            if (cell == null) {
+                continue;
+            }
+            double bound = Double.parseDouble(cond.group(3));
+            boolean holds = switch (cond.group(2)) {
+                case "=", "==" -> cell == bound;
+                case ">" -> cell > bound;
+                case "<" -> cell < bound;
+                case ">=" -> cell >= bound;
+                case "<=" -> cell <= bound;
+                default -> false;
+            };
+            if (holds) {
+                String decision = "종료".equals(branch.group(3)) ? "stop" : "open";
+                return "{\"decision\":\"" + decision + "\",\"index\":" + branch.group(1)
+                        + ",\"reason\":\"조건 '" + branch.group(2).trim()
+                        + "' 이 표의 값으로 성립합니다. (mock 판정)\"}";
+            }
+        }
+        return "{\"decision\":\"continue\"}";
+    }
+
+    /** 본문의 첫 markdown 표 — [헤더, 데이터…] (구분선 제외). 없으면 빈 목록. */
+    private static List<List<String>> mdTable(String body) {
+        List<List<String>> rows = new java.util.ArrayList<>();
+        for (String line : body.lines().toList()) {
+            String t = line.trim();
+            if (!t.startsWith("|")) {
+                if (!rows.isEmpty()) {
+                    break; // 표가 끝났다 — 첫 표만 본다.
+                }
+                continue;
+            }
+            if (t.replace("|", "").replace("-", "").replace(" ", "").isEmpty()) {
+                continue; // 구분선.
+            }
+            rows.add(Arrays.stream(t.substring(1, t.length() - (t.endsWith("|") ? 1 : 0))
+                            .split("\\|"))
+                    .map(String::trim)
+                    .toList());
+        }
+        return rows;
+    }
+
+    /** 헤더에서 컬럼을 찾아(대소문자 무시) 첫 데이터 행의 값을 숫자로 — 아니면 null. */
+    private static Double numericCell(List<List<String>> table, String column) {
+        List<String> header = table.get(0);
+        for (int i = 0; i < header.size(); i++) {
+            if (header.get(i).equalsIgnoreCase(column) && i < table.get(1).size()) {
+                try {
+                    return Double.parseDouble(table.get(1).get(i));
+                } catch (NumberFormatException notNumeric) {
+                    return null;
+                }
+            }
+        }
+        return null;
     }
 
     private static String genericAnswer(String text) {

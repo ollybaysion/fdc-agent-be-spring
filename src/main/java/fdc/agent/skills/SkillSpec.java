@@ -41,8 +41,15 @@ public record SkillSpec(
     public record SkillDependency(String mcp, List<String> tools, String why) {
     }
 
-    /** 흐름 제어(멈춤·스킵). when 은 프로즈가 아니라 조건식. */
-    public record SkillBranch(String when, String then) {
+    /**
+     * 흐름 제어 분기. {@code when} 은 <b>문법 없는 산문</b>이다 — 같은 뜻도 spec 마다
+     * 표기가 제각각일 수 있어({@code rows = 0}, {@code CNT=0}, "건수가 없으면") 기계
+     * 평가하지 않고, 분기 있는 스텝의 데이터가 도착하면 LLM 이 성립 여부를 판정한다
+     * (#55, 방법 1). {@code opens} 가 있으면 <b>열림형</b>(성립 시 그  0-기반 스텝이
+     * 열린다 — 대상 스텝은 기본 잠김), 없으면 <b>종료형</b>(성립 시 절차 종결,
+     * {@code then} 산문이 종결 서술 지시에 실린다).
+     */
+    public record SkillBranch(String when, String then, Integer opens) {
     }
 
     /**

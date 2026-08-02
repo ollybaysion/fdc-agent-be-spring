@@ -34,6 +34,7 @@ public final class QueryPool {
             String produces,
             String sql,
             Map<String, SkillSpec.BindSource> binds,
+            List<SkillSpec.SkillBranch> branches,
             List<SkillSpec.SkillInput> inputs) {
 
         /** 이 스킬의 필수 인자 이름(정렬) — run 이름표(queryKey)의 재료다. */
@@ -88,6 +89,7 @@ public final class QueryPool {
                         step.produces(),
                         step.sql(),
                         step.binds() != null ? step.binds() : Map.of(),
+                        step.branches() != null ? step.branches() : List.of(),
                         inputs));
             }
         }
@@ -124,6 +126,22 @@ public final class QueryPool {
     /** 같은 스킬의 조회들(단계 순). */
     public List<Query> stepsOf(String skill) {
         return all.stream().filter(q -> q.skill().equals(skill)).toList();
+    }
+
+    /**
+     * 잠김 출생 스텝(0-기반) — 어떤 분기의 {@code opens} 대상인 스텝. 기본 경로가
+     * 아니라 분기 판정(open)이 열어 줘야 요청 가능하다(#55). 분기가 없으면 빈 집합.
+     */
+    public java.util.Set<Integer> gatedSteps(String skill) {
+        java.util.Set<Integer> gated = new java.util.LinkedHashSet<>();
+        for (Query q : stepsOf(skill)) {
+            for (SkillSpec.SkillBranch b : q.branches()) {
+                if (b != null && b.opens() != null) {
+                    gated.add(b.opens());
+                }
+            }
+        }
+        return gated;
     }
 
     /**

@@ -191,17 +191,23 @@ public final class NarrationPrompt {
      * 반드시 포함 = 도착 스텝의 {@code produces}, 하지 말 것 = {@code output.avoid}.
      */
     static String answerGuide(SkillSpec spec, Narration narration) {
-        if (spec == null) {
+        boolean branchStopped = narration.branchNote() != null && !narration.branchNote().isBlank();
+        if (spec == null && !branchStopped) {
             return null;
         }
         List<String> parts = new ArrayList<>();
-        if (spec.scope() != null && spec.scope().단위() != null
+        if (spec != null && spec.scope() != null && spec.scope().단위() != null
                 && spec.focus() != null && !spec.focus().isBlank()) {
             String particle = SkillLoader.hasFinalConsonant(spec.focus()) ? "을" : "를";
             parts.add(SECTION_GUIDE + "\n조회한 데이터로 " + spec.scope().단위() + "의 "
                     + spec.focus() + particle + " 설명한다.");
         } else {
             parts.add(SECTION_GUIDE);
+        }
+        if (branchStopped) {
+            // spec 분기(stop)가 절차를 끝냈다 — then 산문이 곧 답의 지시다(#55).
+            parts.add("절차는 spec 분기로 종결됐다 — " + narration.branchNote()
+                    + "\n이 지시에 맞춰 결론을 서술한다.");
         }
 
         List<String> produces = narration.steps().stream()

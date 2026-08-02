@@ -77,7 +77,8 @@ class NarrationPromptTest {
                                 List.of("SNSR_ID", "EQP_ID", "SNSR_TYPE_CD", "UNIT_CD", "USE_YN")),
                         arrival(steps.get(1),
                                 List.of(List.of("CVD-01", "증착기 1호", "CV-800", "AMAT", "Y")),
-                                List.of("EQP_ID", "EQP_NAME", "MODEL_CD", "VENDOR", "USE_YN"))));
+                                List.of("EQP_ID", "EQP_NAME", "MODEL_CD", "VENDOR", "USE_YN"))),
+                null);
     }
 
     private static QueryScope scope() {
@@ -123,7 +124,8 @@ class NarrationPromptTest {
         Narration n = new Narration("fdc-explain-sensor (snsr_id=412086)", "fdc-explain-sensor",
                 Map.of("snsr_id", "412086"),
                 List.of(arrival(steps.get(0), many,
-                        List.of("SNSR_ID", "EQP_ID", "SNSR_TYPE_CD", "UNIT_CD", "USE_YN"))));
+                        List.of("SNSR_ID", "EQP_ID", "SNSR_TYPE_CD", "UNIT_CD", "USE_YN"))),
+                null);
 
         String context = NarrationPrompt.contextSection(null, spec(), n);
         assertThat(context).contains("(23행)").contains("S-0").contains("S-22");
@@ -136,7 +138,8 @@ class NarrationPromptTest {
         Narration n = new Narration("fdc-explain-sensor (snsr_id=412086)", "fdc-explain-sensor",
                 Map.of("snsr_id", "412086"),
                 List.of(arrival(steps.get(0), List.of(),
-                        List.of("SNSR_ID", "EQP_ID", "SNSR_TYPE_CD", "UNIT_CD", "USE_YN"))));
+                        List.of("SNSR_ID", "EQP_ID", "SNSR_TYPE_CD", "UNIT_CD", "USE_YN"))),
+                null);
 
         String context = NarrationPrompt.contextSection(null, spec(), n);
         assertThat(context).contains("## fdc_sensor — 센서 기본 정보 (0행)");

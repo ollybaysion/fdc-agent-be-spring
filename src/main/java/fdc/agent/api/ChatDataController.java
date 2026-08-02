@@ -1,10 +1,12 @@
 package fdc.agent.api;
 
+import fdc.agent.chat.BranchPrompt;
 import fdc.agent.chat.ChatAgent.HistoryMessage;
 import fdc.agent.chat.NarrationPrompt;
 import fdc.agent.chat.PanelJudge;
 import fdc.agent.config.ApiException;
 import fdc.agent.config.AppProps;
+import fdc.agent.contract.BranchDecision;
 import fdc.agent.contract.ChatDataDone;
 import fdc.agent.contract.QueryScope;
 import fdc.agent.llm.LlmTypes.LlmClient;
@@ -74,8 +76,17 @@ public class ChatDataController {
         List<SkillSpec> specs = skillSource.specs();
         QueryPool pool = QueryPool.of(specs);
         PanelJudge.Verdict verdict;
+        BranchDecision fresh = null;
         try {
             verdict = PanelJudge.judge(pool, body);
+            // 분기 판정 — 분기 있는 스텝의 도착이면 LLM 1회. 성립(stop/open)이면 그
+            // 사실을 넣어 재판정하고, continue·실패는 분기 없던 동작 그대로다(#55).
+            if (verdict.branchQuestion() != null) {
+                fresh = judgeBranch(specs, pool, verdict.branchQuestion());
+                if (fresh != null) {
+                    verdict = PanelJudge.judge(pool, body, fresh);
+                }
+            }
         } catch (Exception err) {
             log.error("chat/data judge error", err);
             int statusCode = err instanceof ApiException api ? api.status() : 500;
@@ -94,6 +105,11 @@ public class ChatDataController {
                 : null;
 
         String messageId = "msg_" + Long.toString(System.currentTimeMillis(), 36);
+        List<BranchDecision> decisions = new java.util.ArrayList<>(
+                body.branchDecisions() != null ? body.branchDecisions() : List.of());
+        if (fresh != null) {
+            decisions.add(fresh);
+        }
         ChatDataDone done = new ChatDataDone(
                 messageId,
                 body.eventId(),
@@ -101,6 +117,7 @@ public class ChatDataController {
                 pool.rev(),
                 verdict.runsProgress(),
                 emptyToNull(verdict.terminalRuns()),
+                emptyToNull(decisions),
                 text != null ? verdict.narration().runLabel() : null);
 
         Map<String, Object> traceOut = new LinkedHashMap<>();
@@ -153,6 +170,39 @@ public class ChatDataController {
         }
     }
 
+    /**
+     * 분기 판정 한 번 — 툴 없는 단일 호출, 판정 본문 user 메시지 하나(#55, 문안은
+     * {@code docs/branch-prompt.md}). 성립(stop/open)만 사실로 만들고, continue·
+     * 실패·계약 밖 응답은 전부 null — 분기 없던 동작으로 떨어진다(best-effort).
+     */
+    private BranchDecision judgeBranch(
+            List<SkillSpec> specs, QueryPool pool, PanelJudge.BranchQuestion question) {
+        SkillSpec spec = specs.stream()
+                .filter(s -> s != null && question.skill().equals(s.name()))
+                .findFirst()
+                .orElse(null);
+        List<LlmMessage> prompt = BranchPrompt.messages(BranchPrompt.body(
+                spec, question.skill(), question.args(), question.query(),
+                pool.stepsOf(question.skill()), question.data()));
+        try {
+            Trace.emit("BE→LLM 분기 판정 요청 (툴 없음)", prompt);
+            LlmTurn turn = llm.next(prompt, List.of());
+            Trace.emit("LLM→BE 분기 판정 응답", turn);
+            String content = turn instanceof LlmTurn.Final fin ? fin.content() : null;
+            BranchPrompt.Call call = BranchPrompt.parse(content, question.query().branches());
+            if (call == null) {
+                return null;
+            }
+            return new BranchDecision(
+                    question.skill(), question.args(), question.query().step(),
+                    call.decision(), call.index(),
+                    call.reason() == null || call.reason().isBlank() ? null : call.reason().trim());
+        } catch (RuntimeException e) {
+            Trace.raw("분기 판정 실패 (continue 로 강등)", String.valueOf(e));
+            return null;
+        }
+    }
+
     /** 요청 트레이스 — 스냅샷 rows 만 앞부분으로 줄인다({@code /chat} 과 같은 방식). */
     private static void traceRequest(PanelJudge.PanelBody body, List<HistoryMessage> messages) {
         if (!Trace.on()) {
@@ -167,13 +217,14 @@ public class ChatDataController {
         out.put("snapshots", body.snapshots() == null
                 ? null
                 : body.snapshots().stream().map(ChatController::traceSnapshot).toList());
+        out.put("branchDecisions", body.branchDecisions());
         out.put("scope", body.scope());
         out.put("inputs", body.inputs());
         out.put("messages", messages.size() + "개");
         Trace.emit("FE→BE 요청 POST /api/fdc/v1/chat/data", out);
     }
 
-    private static List<String> emptyToNull(List<String> list) {
+    private static <T> List<T> emptyToNull(List<T> list) {
         return list == null || list.isEmpty() ? null : list;
     }
 }
