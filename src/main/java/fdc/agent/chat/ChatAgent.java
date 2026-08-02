@@ -208,7 +208,7 @@ public class ChatAgent {
         // 스텝 한도 초과. 마지막 툴 요약을 그대로 돌려주면 스킬의 [출력 지침]·[하지 말 것]
         // 같은 내부 지시문이 화면에 그대로 나가므로, 모아 둔 표·카드만 들려 보낸다.
         return new AgentResult(OUT_OF_STEPS, tables, FinishReason.LENGTH, List.of(),
-                dataRequests.collected(), inputRequests.collected());
+                collectedRequests(dataRequests), inputRequests.collected());
     }
 
     /** 조달 요청 — 풀이 비어 툴이 안 붙은 요청에서는 애초에 모일 것이 없다. */
