@@ -221,11 +221,12 @@ footer.derived {
 <!-- CONTENT:START — 아래 예시를 실제 내용으로 교체한다. {{...}}는 전부 채운다.
      블록 어휘·스니펫·확장 규칙은 design.md — 색은 var(--...) 토큰만. -->
 <header>
-  <h1>질문 유형(QT) 분류와 유형별 설계 전략 <span class="badge">v0.1</span></h1>
+  <h1>질문 유형(QT) 분류와 유형별 설계 전략 <span class="badge">v0.2</span></h1>
   <p class="doc-meta">작성 2026-08-02 · 상태 초안 · 적용 대상: Inline FDC Agent 백엔드(fdc-agent-be-spring)</p>
   <details class="revlog">
     <summary>개정 로그</summary>
     <ul>
+      <li><b>v0.2</b> (2026-08-02) — §10 참고 문헌에 2025~26 하네스 엔지니어링 문서 4건 보강.</li>
       <li><b>v0.1</b> (2026-08-02) — 최초 작성. QT1~4 분류 축·유형별 전략·경계 규칙·골든셋 연계 정리.</li>
     </ul>
   </details>
@@ -522,6 +523,20 @@ QT4 발생 로그  ──▶  반복 조합 발견  ──▶  spec 저작 (skil
       Building effective agents</a> — workflow vs agent 구분.</li>
     <li><a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/programmatic-tool-calling">Anthropic,
       Programmatic Tool Calling</a> — 오케스트레이션을 모델 턴이 아니라 코드로. QT2 전략의 원리.</li>
+    <li><a href="https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents">Anthropic,
+      Effective harnesses for long-running agents</a> (2025-11) — 강한 모델도 자유 계획 대신
+      결정론 체크리스트(전 항목 "실패"로 시작, 한 번에 하나)로 묶는 게 낫다는 자기 실증.
+      QT4 plan-first를 "하네스 강제 제어 구조"로 설계할 근거.</li>
+    <li><a href="https://claude.com/blog/building-multi-agent-systems-when-and-how-to-use-them">Anthropic,
+      When to use multi-agent systems (and when not to)</a> (2026-01) — 멀티에이전트 절제론
+      (토큰 3~10배). 순차 단계의 에이전트 분리 금지, 검증 전담 에이전트 권장 — panel-judge와
+      같은 방향.</li>
+    <li><a href="https://claude.com/blog/harnessing-claudes-intelligence">Anthropic,
+      Agent Harness Design: 3 Patterns</a> (2026-04) — 하네스 정의(루프·툴·컨텍스트·가드레일)와
+      최소주의. "모델이 이미 아는 것을 활용하라"는 약한 모델 환경에선 역방향 적용
+      (spec·akg가 지식을 공급).</li>
+    <li><a href="https://claude.com/blog/a-harness-for-every-task-dynamic-workflows-in-claude-code">Anthropic,
+      A harness for every task</a> (2026) — 과업별 동적 workflow 구성.</li>
   </ul>
 </section>
 <!-- CONTENT:END -->
