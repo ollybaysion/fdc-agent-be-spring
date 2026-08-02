@@ -27,7 +27,7 @@
 | 계약(DTO) | **Java record + Jackson** | zod 계약과 1:1 — 선언 순서=JSON 키 순서, `@JsonInclude(NON_NULL)`=optional, `ALWAYS`=nullable(matchedRun). 숫자는 `Number`로 JS 표기 유지 |
 | Oracle 접근 | **ojdbc11(thin) + HikariCP + `JdbcClient`** | thin = Instant Client 불필요·19c 호환. 네임드 바인드(`:id`)가 스킬 spec SQL과 1:1. read-only 정형 SQL이라 JPA 불채용 |
 | LLM 클라이언트 | **`java.net.http` 직구현** (OpenAiLlm) | OpenAI 호환 온프렘 GW 대응. 툴 루프(MAX_STEPS=4)가 작고 명시적이라 프레임워크(Spring AI) 없이 동작 보존 우선. mock ↔ openai seam 유지 |
-| 검증·에러 | 컨트롤러 명시 검증 + `@RestControllerAdvice` | 입력 캡(100/10k) 재적용, API.md 에러코드 미러링, prod 5xx 상세 마스킹 |
+| 검증·에러 | 컨트롤러 명시 검증 + `@RestControllerAdvice`(`ResponseEntityExceptionHandler` 상속) | 입력 캡(100/10k) 재적용, API.md 에러코드 미러링, prod 5xx 상세 마스킹. 상속하는 이유 = advice 가 MVC 기본 처리기보다 먼저 돌아 **405·415 같은 프레임워크 예외가 포괄 핸들러에 삼켜져 500 이 되던 것**(#45); 부모의 ProblemDetail 본문은 `handleExceptionInternal` 이 `{error, message?}` 로 되돌린다 |
 | 로깅 | **SLF4J/Logback + MDC** | `X-Request-Id` 전파. 요청 헤더는 애초에 로깅 안 함 — 로깅 확장 시 민감 헤더 마스킹 필수 |
 | 테스트 | **JUnit 5 + Spring Boot Test/MockMvc** | vitest 스위트에서 출발해 이제는 Spring 판이 기준. MockMvc = Fastify `.inject()` 대응 |
 | 회귀 판정 | **JUnit 스위트**. `scripts/parity.sh` 는 잔여 3케이스만 | Node 대조군은 사실상 소진 — spec v2(2026-07-21)와 equipment 스택 제거(2026-07-27)로 두 판의 응답이 갈렸다 |
