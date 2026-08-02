@@ -29,6 +29,7 @@
   "steps": [
     {
       "title": "1단계 — 구간 측정 집계",
+      "table": "fdc_sensor_reading",
       "produces": "측정 분포(건수·평균·범위·이탈)",
       "sql": "SELECT COUNT(*) AS CNT, ROUND(AVG(meas_val), 2) AS MEAN, ROUND(STDDEV(meas_val), 2) AS SD, ROUND(MIN(meas_val), 2) AS MINV, ROUND(MAX(meas_val), 2) AS MAXV, COUNT(CASE WHEN oo_spec_yn = 'Y' THEN 1 END) AS ANOM\n  FROM fdc_sensor_reading\n WHERE eqp_id = :eqp AND param_index = :pidx\n   AND read_time BETWEEN :start AND :end",
       "binds": {
@@ -46,6 +47,7 @@
     },
     {
       "title": "2단계 — 측정을 낸 설비",
+      "table": "fdc_equipment",
       "produces": "수집 설비",
       "lead": "입력 `equipment`로:",
       "sql": "SELECT eqp_id, eqp_name, model_cd, vendor, use_yn\n  FROM fdc_equipment WHERE eqp_id = :eqp",
@@ -53,6 +55,7 @@
     },
     {
       "title": "3단계 — 수집 기간의 설비 이벤트",
+      "table": "fdc_setup_event",
       "produces": "수집 시점 설비 이벤트",
       "sql": "SELECT TO_CHAR(evt_time, 'YYYY-MM-DD') AS d, evt_type_cd, evt_label\n  FROM fdc_setup_event WHERE eqp_id = :eqp\n ORDER BY evt_time DESC FETCH FIRST 3 ROWS ONLY",
       "binds": { "eqp": { "from": "arg", "arg": "equipment" } },

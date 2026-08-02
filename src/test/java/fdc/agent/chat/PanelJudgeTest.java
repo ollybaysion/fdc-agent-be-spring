@@ -30,11 +30,11 @@ class PanelJudgeTest {
                 List.of(new SkillSpec.SkillInput("id", true, "조회 키")),
                 null,
                 List.of(
-                        new SkillSpec.SkillStep("1단계 — 기준", "기준", null,
+                        new SkillSpec.SkillStep("1단계 — 기준", null, "기준", null,
                                 "SELECT A, B FROM t0 WHERE id = :id",
                                 Map.of("id", new SkillSpec.BindSource("arg", "id", null, null)),
                                 null, null),
-                        new SkillSpec.SkillStep("2단계 — 상세", "상세", null,
+                        new SkillSpec.SkillStep("2단계 — 상세", null, "상세", null,
                                 "SELECT C FROM t1 WHERE a = :a",
                                 Map.of("a", new SkillSpec.BindSource("step", null, 0, "A")),
                                 null, null)),
@@ -47,7 +47,7 @@ class PanelJudgeTest {
                 List.of(new SkillSpec.SkillInput("id", true, "조회 키"),
                         new SkillSpec.SkillInput("opt", false, "선택")),
                 null,
-                List.of(new SkillSpec.SkillStep("1단계", null, null,
+                List.of(new SkillSpec.SkillStep("1단계", null, null, null,
                         "SELECT X FROM q WHERE o = :o",
                         Map.of("o", new SkillSpec.BindSource("arg", "opt", null, null)),
                         null, null)),
@@ -214,7 +214,12 @@ class PanelJudgeTest {
 
         assertThat(v.narration()).isNotNull();
         assertThat(v.narration().runLabel()).isEqualTo("t-two-step (id=X-1)");
-        assertThat(v.narration().summary()).contains(ChatPrompt.SECTION_ARRIVED).contains("0행");
+        assertThat(v.narration().skill()).isEqualTo("t-two-step");
+        assertThat(v.narration().args()).isEqualTo(Map.of("id", "X-1"));
+        // 도착 실물 — 0행 1단계 하나. 문장 합성은 NarrationPrompt 소관이라 여기 없다.
+        assertThat(v.narration().steps()).hasSize(1);
+        assertThat(v.narration().steps().get(0).query().queryId()).isEqualTo("t-two-step#0");
+        assertThat(v.narration().steps().get(0).hit().isEmptyResult()).isTrue();
     }
 
     @Test

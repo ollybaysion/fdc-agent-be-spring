@@ -45,9 +45,6 @@ public final class ChatPrompt {
     /** 입력 카드로 채워 되보낸 스칼라 값. */
     public static final String SECTION_INPUTS = "[제공된 입력 — 사용자 입력]";
 
-    /** 절차를 완료시킨 도착 데이터 — 종결 서술 지시({@code /chat/data})의 머리표. */
-    public static final String SECTION_ARRIVED = "[도착한 데이터 — 절차 완료]";
-
     /**
      * 툴과 무관한 공통 규율 — 정체성, 지어내지 않기, 답변 서식.
      *
@@ -110,40 +107,6 @@ public final class ChatPrompt {
         }
         messages.addAll(hist);
         return messages;
-    }
-
-    /**
-     * 종결 서술 호출({@code /chat/data})의 메시지 — {@code runLoop} 재사용 금지
-     * (#38 T6·T12): 툴 없이 깨끗한 맥락만 조립한다. 마지막 질문·답변에 도착 데이터
-     * 요약과 명시 지시를 더한 <b>user 메시지로 끝난다</b> — assistant 로 끝나는
-     * 히스토리를 GW 에 보내지 않는다.
-     */
-    public static List<LlmMessage> narrationMessages(List<HistoryMessage> history, String summary) {
-        String lastUser = null;
-        String lastAssistant = null;
-        for (int i = (history != null ? history.size() : 0) - 1; i >= 0; i--) {
-            HistoryMessage m = history.get(i);
-            if (m == null || m.content() == null || m.content().isBlank()) {
-                continue;
-            }
-            if (lastAssistant == null && m.role() == Role.ASSISTANT) {
-                lastAssistant = m.content();
-            }
-            if (m.role() == Role.USER) {
-                lastUser = m.content();
-                break;
-            }
-        }
-        List<LlmMessage> out = new ArrayList<>();
-        out.add(LlmMessage.of(Role.USER, lastUser != null ? lastUser : "이전 질문"));
-        if (lastAssistant != null) {
-            out.add(LlmMessage.of(Role.ASSISTANT, lastAssistant));
-        }
-        out.add(LlmMessage.of(Role.USER, summary
-                + "\n\n위 데이터가 방금 도착해 조회 절차가 완료됐다. 처음 질문의 의도에 맞춰"
-                + " 이 데이터로 결론을 한국어로 서술하라. 조회하지 않은 값은 지어내지 말고,"
-                + " 표 전체를 다시 그리지 말고 해석과 결론에 집중하라."));
-        return out;
     }
 
     /** 맥락 섹션들을 빈 줄로 이어 하나의 블록으로. 전부 비면 null(주입 안 함). */

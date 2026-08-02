@@ -169,6 +169,57 @@ public final class SqlRender {
         return columns.isEmpty() ? null : List.copyOf(columns);
     }
 
+    /**
+     * FROM 절의 원천 테이블명(소문자) — <b>단일 테이블 SELECT 한정</b>. 서술 맥락의
+     * 데이터 블록 헤딩·db-schema 발췌 키가 spec {@code steps[].table} 이 없을 때
+     * 유도하는 폴백이다(akg #44 전 spec 호환).
+     *
+     * <p>자신 없으면 {@code null} — 서브쿼리·조인·다중 테이블이면 이름을 지어내지
+     * 않는다({@link #columnsOf} 와 같은 규율).
+     */
+    public static String tableOf(String sql) {
+        if (sql == null || sql.isBlank()) {
+            return null;
+        }
+        String mask = maskLiterals(sql);
+        int selectAt = indexOfKeyword(mask, "SELECT", 0);
+        if (selectAt < 0 || !mask.substring(0, selectAt).isBlank()) {
+            return null;
+        }
+        int fromAt = indexOfTopLevelKeyword(mask, "FROM", selectAt + "SELECT".length());
+        if (fromAt < 0) {
+            return null;
+        }
+        int i = fromAt + "FROM".length();
+        while (i < mask.length() && Character.isWhitespace(mask.charAt(i))) {
+            i++;
+        }
+        int start = i;
+        while (i < mask.length()
+                && (isIdentPart(mask.charAt(i)) || mask.charAt(i) == '$'
+                        || mask.charAt(i) == '#' || mask.charAt(i) == '.')) {
+            i++;
+        }
+        if (start == i || !isIdentStart(mask.charAt(start))) {
+            return null; // "FROM (" 서브쿼리 등 — 테이블명이 아니다.
+        }
+        // 테이블이 더 나오면(조인·쉼표 나열) 하나를 고르지 않는다 — FROM 절은
+        // 다음 절 키워드 앞까지다.
+        String tail = mask.substring(i);
+        int clauseEnd = tail.length();
+        for (String kw : List.of("WHERE", "GROUP", "ORDER", "FETCH")) {
+            int at = indexOfTopLevelKeyword(tail, kw, 0);
+            if (at >= 0 && at < clauseEnd) {
+                clauseEnd = at;
+            }
+        }
+        String fromClause = tail.substring(0, clauseEnd);
+        if (fromClause.contains(",") || indexOfKeyword(fromClause, "JOIN", 0) >= 0) {
+            return null;
+        }
+        return sql.substring(start, i).toLowerCase();
+    }
+
     /** 따옴표 리터럴 내용을 공백으로 덮은 사본 — 위치는 원문과 1:1 이라 substring 이 통한다. */
     private static String maskLiterals(String sql) {
         char[] out = sql.toCharArray();

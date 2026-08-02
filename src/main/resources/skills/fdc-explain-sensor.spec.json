@@ -22,6 +22,7 @@
   "steps": [
     {
       "title": "1단계 — 센서 기본 정보",
+      "table": "fdc_sensor",
       "produces": "센서 정체·상태",
       "sql": "SELECT snsr_id, eqp_id, snsr_type_cd, unit_cd, use_yn\n  FROM fdc_sensor WHERE snsr_id = :id",
       "binds": { "id": { "from": "arg", "arg": "snsr_id" } },
@@ -34,6 +35,7 @@
     },
     {
       "title": "2단계 — 소속 설비",
+      "table": "fdc_equipment",
       "produces": "소속 설비",
       "lead": "1단계의 `EQP_ID`로:",
       "sql": "SELECT eqp_id, eqp_name, model_cd, vendor, use_yn\n  FROM fdc_equipment WHERE eqp_id = :eqp",
@@ -41,6 +43,7 @@
     },
     {
       "title": "3단계 — 설비 최근 이벤트 (정비 맥락)",
+      "table": "fdc_setup_event",
       "produces": "최근 설비 이벤트",
       "sql": "SELECT TO_CHAR(evt_time, 'YYYY-MM-DD') AS d, evt_type_cd, evt_label\n  FROM fdc_setup_event WHERE eqp_id = :eqp\n ORDER BY evt_time DESC FETCH FIRST 3 ROWS ONLY",
       "binds": { "eqp": { "from": "step", "step": 0, "column": "EQP_ID" } },

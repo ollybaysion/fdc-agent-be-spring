@@ -1,16 +1,18 @@
 package fdc.agent.api;
 
 import fdc.agent.chat.ChatAgent.HistoryMessage;
-import fdc.agent.chat.ChatPrompt;
+import fdc.agent.chat.NarrationPrompt;
 import fdc.agent.chat.PanelJudge;
 import fdc.agent.config.ApiException;
 import fdc.agent.config.AppProps;
 import fdc.agent.contract.ChatDataDone;
+import fdc.agent.contract.QueryScope;
 import fdc.agent.llm.LlmTypes.LlmClient;
 import fdc.agent.llm.LlmTypes.LlmMessage;
 import fdc.agent.llm.LlmTypes.LlmTurn;
 import fdc.agent.skills.QueryPool;
 import fdc.agent.skills.SkillSource;
+import fdc.agent.skills.SkillSpec;
 import fdc.agent.util.Trace;
 import jakarta.servlet.ServletOutputStream;
 import jakarta.servlet.http.HttpServletResponse;
@@ -68,7 +70,8 @@ public class ChatDataController {
 
         traceRequest(body, messages);
 
-        QueryPool pool = QueryPool.of(skillSource.specs());
+        List<SkillSpec> specs = skillSource.specs();
+        QueryPool pool = QueryPool.of(specs);
         PanelJudge.Verdict verdict;
         try {
             verdict = PanelJudge.judge(pool, body);
@@ -85,7 +88,9 @@ public class ChatDataController {
         }
 
         // 종결 서술 — best-effort: LLM 이 실패해도 판정(카드·진행)은 그대로 나간다.
-        String text = verdict.narration() != null ? narrate(messages, verdict.narration()) : null;
+        String text = verdict.narration() != null
+                ? narrate(messages, body.scope(), specs, verdict.narration())
+                : null;
 
         String messageId = "msg_" + Long.toString(System.currentTimeMillis(), 36);
         ChatDataDone done = new ChatDataDone(
@@ -128,11 +133,17 @@ public class ChatDataController {
     }
 
     /**
-     * 종결 서술 한 문단 — {@code runLoop} 가 아니라 툴 없는 단일 호출이고, 맥락은
-     * {@link ChatPrompt#narrationMessages} 가 깨끗하게 새로 조립한다(T6·T12).
+     * 종결 서술 한 문단 — {@code runLoop} 가 아니라 툴 없는 단일 호출(T6·T12)이고,
+     * 프롬프트는 {@link NarrationPrompt} 가 v3 로 합성한다(#51): 정체성 + 이력 +
+     * 맥락 섹션(질의 대상·데이터 전량·답변 가이드) + 지시.
      */
-    private String narrate(List<HistoryMessage> messages, PanelJudge.Narration narration) {
-        List<LlmMessage> prompt = ChatPrompt.narrationMessages(messages, narration.summary());
+    private String narrate(List<HistoryMessage> messages, QueryScope scope,
+            List<SkillSpec> specs, PanelJudge.Narration narration) {
+        SkillSpec spec = specs.stream()
+                .filter(s -> s != null && narration.skill().equals(s.name()))
+                .findFirst()
+                .orElse(null);
+        List<LlmMessage> prompt = NarrationPrompt.messages(messages, scope, spec, narration);
         try {
             Trace.emit("BE→LLM 종결 서술 요청 (툴 없음)", prompt);
             LlmTurn turn = llm.next(prompt, List.of());

@@ -2,6 +2,7 @@ package fdc.agent.llm;
 
 import fdc.agent.chat.ChatPrompt;
 import fdc.agent.chat.DataRequestTool;
+import fdc.agent.chat.NarrationPrompt;
 import fdc.agent.chat.InputRequestTool;
 import fdc.agent.chat.SnapshotQueryTool;
 import fdc.agent.contract.Role;
@@ -62,10 +63,11 @@ public class MockLlm implements LlmClient {
         if (question.contains("후속 질문 3개")) {
             return new LlmTurn.Final(followupSuggestions(messages));
         }
-        // 종결 서술 지시(/chat/data) — 실 모델이 해석·결론을 쓸 자리를 목은 도착 요약을
-        // 결정적으로 되읽어 흉내낸다. 제한망 1차 배포가 바로 이 경로다(#38 T6).
-        if (question.contains(ChatPrompt.SECTION_ARRIVED)) {
-            return new LlmTurn.Final(narration(question));
+        // 종결 서술 지시(/chat/data) — 실 모델이 해석·결론을 쓸 자리를 목은 맥락
+        // 섹션(# 데이터)의 블록 헤딩을 결정적으로 되읽어 흉내낸다. 제한망 1차 배포가
+        // 바로 이 경로다(#38 T6). 감지는 문장이 아니라 지시 상수에 붙는다.
+        if (question.contains(NarrationPrompt.NARRATE_INSTRUCTION)) {
+            return new LlmTurn.Final(narration(contextSection(messages)));
         }
         LlmToolCall call = planCall(question, contextSection(messages), tools);
         if (call != null) {
@@ -247,10 +249,14 @@ public class MockLlm implements LlmClient {
         return "[\"S-0004 조회 SQL 로 요청해줘\", \"CVD-01 측정 분석해줘\", \"이 데이터로 정리해줘\"]";
     }
 
-    /** 서술 지시 메시지에서 절차·단계 줄만 되읽어 결정적 종결 서술을 만든다. */
-    private static String narration(String question) {
-        List<String> lines = question.lines()
-                .filter(l -> l.startsWith("절차: ") || l.startsWith("- "))
+    /** 맥락 섹션에서 질의 대상·데이터 블록 헤딩만 되읽어 결정적 종결 서술을 만든다. */
+    private static String narration(String context) {
+        // 답변 가이드 절의 불릿(반드시 포함·하지 말 것)은 지시이지 데이터가 아니다 —
+        // 되읽으면 목 서술이 지시문을 읊게 되므로 그 앞까지만 본다.
+        int guideAt = context.indexOf(NarrationPrompt.SECTION_GUIDE);
+        String visible = guideAt >= 0 ? context.substring(0, guideAt) : context;
+        List<String> lines = visible.lines()
+                .filter(l -> l.startsWith("## ") || l.startsWith("- "))
                 .toList();
         return "요청하신 조회 절차가 완료됐습니다.\n" + String.join("\n", lines)
                 + "\n\n위 결과가 도착한 데이터의 전부입니다 — 값 전문은 데이터 패널에서 확인하세요. "
