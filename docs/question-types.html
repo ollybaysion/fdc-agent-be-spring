@@ -135,6 +135,15 @@ details.revlog {
 }
 details.revlog summary { cursor: pointer; font-weight: 600; color: var(--muted); }
 details.revlog ul { margin: 0.5rem 0 0.25rem; }
+.callout {
+  border: 2px solid var(--accent);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 0.75rem 1.1rem;
+  margin: 1rem 0 1.5rem;
+}
+.callout > p { margin: 0.25rem 0; }
+.callout .callout-title { font-weight: 700; color: var(--accent); }
 
 /* ── 코드·다이어그램·표: 가로 스크롤은 각자 컨테이너 안에서만 ── */
 code {
@@ -221,16 +230,26 @@ footer.derived {
 <!-- CONTENT:START — 아래 예시를 실제 내용으로 교체한다. {{...}}는 전부 채운다.
      블록 어휘·스니펫·확장 규칙은 design.md — 색은 var(--...) 토큰만. -->
 <header>
-  <h1>질문 유형(QT) 분류와 유형별 설계 전략 <span class="badge">v0.2</span></h1>
-  <p class="doc-meta">작성 2026-08-02 · 상태 초안 · 적용 대상: Inline FDC Agent 백엔드(fdc-agent-be-spring)</p>
+  <h1>질문 유형(QT) 분류와 유형별 설계 전략 <span class="badge">v0.3 · 정본 전략</span></h1>
+  <p class="doc-meta">작성 2026-08-02 · 상태 확정(전략)·초안(세부) · 적용 대상: Inline FDC Agent 백엔드(fdc-agent-be-spring)</p>
   <details class="revlog">
     <summary>개정 로그</summary>
     <ul>
+      <li><b>v0.3</b> (2026-08-02) — <b>정본 전략 선언 승격</b>: §0에 전략 선언·행위자 표 추가,
+        §8 운영 루프에 행위자(asf·akg·obs·골든셋)와 라우팅 세금 반영, §7에 QT4 실패 폴백 2단 정책.</li>
       <li><b>v0.2</b> (2026-08-02) — §10 참고 문헌에 2025~26 하네스 엔지니어링 문서 4건 보강.</li>
       <li><b>v0.1</b> (2026-08-02) — 최초 작성. QT1~4 분류 축·유형별 전략·경계 규칙·골든셋 연계 정리.</li>
     </ul>
   </details>
 </header>
+
+<div class="callout">
+  <p class="callout-title">⚑ 이 문서가 현재의 최상위 정본 전략이다 (2026-08-02 확정)</p>
+  <p>Inline FDC Agent의 모든 설계·이슈·구현은 <a href="#strategy">§0 전략 선언</a>과
+    <a href="#boundaries">§8 운영 루프</a>에 정렬한다. 다른 문서·이슈가 이 문서와
+    충돌하면 <b>이 문서가 이긴다</b>. 전략을 바꿀 때는 이 문서를 먼저 개정하고
+    (버전·개정 로그), 그 다음에 이슈·코드를 움직인다.</p>
+</div>
 
 <section>
   <h2 id="summary">0. 한 줄 요약</h2>
@@ -241,6 +260,28 @@ footer.derived {
     계획의 저작자는 기본이 <b>사람(spec)</b>이고, LLM은 QT4에서만 예비 저작자다.
     모든 유형의 품질 판정은 QT 라벨이 달린 라우팅 골든셋
     (<a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/32">#32</a>)이 맡는다.</p>
+
+  <h3 id="strategy">전략 선언</h3>
+  <blockquote>
+    <p><b>spec 존(QT1/2)을 akg·asf로 넓히고, 잔여(QT4)는 통제된 agent로 받아내되,
+    obs로 발굴하고 골든셋으로 판정하며 승격을 돌려 agent 존을 계속 좁힌다 —
+    지식(QT3)은 akg 코퍼스가 별도로 채운다.</b></p>
+  </blockquote>
+  <p>자율성은 목표가 아니라 예산이다. 약한 고정 온프렘 모델 환경에서는 예측 가능한
+    부분을 workflow로 내리고, 예측 불가능한 잔여만 agent로 남기고, 그 경계를
+    측정으로 계속 spec 쪽으로 옮기는 것이 최적이다. 행위자별 역할:</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>행위자</th><th>역할</th><th>담당 존</th></tr></thead>
+      <tbody>
+        <tr><td><b>asf</b> (agent-skill-foundry)</td><td>생산 — 절차를 spec으로 저작(공장, 템플릿+검증기)</td><td>QT1/2 확장</td></tr>
+        <tr><td><b>akg</b> (agent-knowledge-governance)</td><td>유통 — spec 허브(rev·active·런타임 fetch) / 별도로 지식 코퍼스 공급</td><td>QT1/2 배달 · QT3 품질</td></tr>
+        <tr><td><b>obs</b> (<a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/48">#48</a>)</td><td>발굴 — QT4 반복 조합 계측 = 승격 백로그 공급</td><td>QT4 축소의 입력</td></tr>
+        <tr><td><b>골든셋</b> (<a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/32">#32</a>)</td><td>판정 — 승격·라우팅 변경마다 회귀를 숫자로 확인</td><td>전 존의 게이트</td></tr>
+        <tr><td><b>BE</b> (이 레포)</td><td>소비·실행 — 라우팅, 결정론 실행기, agent 폴백, 계측</td><td>전 존</td></tr>
+      </tbody>
+    </table>
+  </div>
 </section>
 
 <section>
@@ -469,25 +510,42 @@ footer.derived {
   </ul>
   <p><b>채택 판정</b>: 골든셋에서 plan on/off 비교(완주율·왕복 수·스텝 분포·LENGTH율).
     숫자 없이 채택하지 않는다.</p>
+  <p><b>실패 폴백 = 2단 정책</b>: ① 시도(agent 또는 plan-first) → ② 계획 검증 실패·스텝
+    소진 시 <b>정직한 한계 고지</b>로 내려앉는다 — "이 조합은 지원 절차가 없습니다"
+    + 가장 가까운 스킬 제안 + 필요 데이터 요청 카드(기존 QT3 서술·조달 부품 재사용).
+    약한 모델이 허우적대다 내는 그럴듯한 오답이 agent 존의 최악 사례이므로, 이를
+    구조적으로 차단한다.</p>
 </section>
 
 <section>
-  <h2 id="boundaries">8. 경계 규칙과 승격 플라이휠</h2>
+  <h2 id="boundaries">8. 운영 루프 — 경계 규칙과 승격 플라이휠</h2>
   <h3 id="boundary-qt3">QT3 ↔ QT1/2 경계 = "새 데이터가 필요해지는 순간"</h3>
   <p>"이 값 왜 튀었어요?"는 QT3이지만, 답하다가 그 시점 이벤트 로그가 필요해지면 그 턴은
     QT1(이벤트 스킬 라우팅)로 넘어간다. QT는 턴 단위 분류이고, 한 턴 안에서 QT3 서술과
     QT1 조달이 섞일 수 있다.</p>
   <h3 id="boundary-qt4">QT2 ↔ QT4 경계 = "반복되는가"</h3>
   <p>처음 보는 조합은 QT4다. 같은 조합이 로그에 반복해서 찍히면 spec 승격 후보가 된다.
-    이것이 운영 플라이휠이다:</p>
+    이것이 운영 플라이휠이고, <a href="#strategy">§0 전략 선언</a>의 실행 형태다:</p>
   <figure>
     <pre class="diagram">
-QT4 발생 로그  ──▶  반복 조합 발견  ──▶  spec 저작 (skill foundry)  ──▶  QT2/QT1로 승격
-     ▲                                                                      │
-     └──────────────  QT4 존 축소 = #39 폴백 부담 감소  ◀────────────────────┘</pre>
-    <figcaption>D2. QT4 발생 로그가 곧 스킬 저작 백로그다. 승격할수록 런타임 계획이
-      필요한 영역이 줄어든다.</figcaption>
+운영 중 QT4 발생 (통제된 agent 폴백 — 실패 시 정직 고지, §7)
+      │  obs #48이 계측
+      ▼
+반복 조합 발굴  ──▶  asf가 spec 저작(생산)  ──▶  akg가 유통(허브)  ──▶  골든셋 #32가 회귀 판정
+                                                                            │
+      ┌─────────────────────────────────────────────────────────────────────┘
+      ▼
+QT1/2 존 확대  ──▶  스킬 수 증가 = 라우팅 세금 발생  ──▶  #33 L0 / #34 L1 / akg#43로 납부
+      │
+      ▼
+QT4 존 축소  (루프 처음으로)</pre>
+    <figcaption>D2. 운영 루프 — QT4 발생 로그가 곧 스킬 저작 백로그다. 승격할수록
+      런타임 계획이 필요한 영역이 줄어든다.</figcaption>
   </figure>
+  <p><b>라우팅 세금</b>: 승격은 공짜가 아니다. 스킬이 늘수록 라우팅(QT1의 심장) 정확도가
+    떨어지는 것이 스킬 스케일링 문제의 출발점이므로, QT1/2 확장에는 라우팅 보강이
+    반드시 동반된다. 납부 시점은 골든셋의 top-1 정확도가 알려준다(스킬 6+에서 L0,
+    10+에서 L1).</p>
 </section>
 
 <section>
