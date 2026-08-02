@@ -91,4 +91,23 @@ class SkillsApiTest {
         assertThat(prior).containsExactly("eqp");
         assertThat(dependent.path("argBinds")).isEmpty();
     }
+
+    @Test
+    void 스텝은_bind_배선_전문을_준다() throws Exception {
+        // binds = 배선 전문 — FE 가 판정 왕복 없이 스텝 상태를 파생하는 재료(dataList).
+        JsonNode trace = byName(skills(), "fdc-trace-reading");
+        assertThat(trace).isNotNull();
+        JsonNode step0 = trace.path("steps").get(0);
+        assertThat(step0.path("binds").path("eqp").path("from").asText()).isEqualTo("arg");
+        assertThat(step0.path("binds").path("eqp").path("arg").asText()).isEqualTo("equipment");
+        assertThat(step0.path("binds").path("eqp").has("step")).isFalse();
+
+        JsonNode explain = byName(skills(), "fdc-explain-sensor");
+        assertThat(explain).isNotNull();
+        JsonNode wired = explain.path("steps").get(1).path("binds").path("eqp");
+        assertThat(wired.path("from").asText()).isEqualTo("step");
+        assertThat(wired.path("step").asInt()).isEqualTo(0);
+        assertThat(wired.path("column").asText()).isEqualTo("EQP_ID");
+        assertThat(wired.has("arg")).isFalse();
+    }
 }
