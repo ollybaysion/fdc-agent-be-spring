@@ -49,9 +49,14 @@ public record SkillSpec(
      * 조회 스텝. {@code produces} = 이 스텝이 답에 기여하는 차원 한 마디로,
      * 로더가 이어서 출력 지침의 <b>반드시 포함</b> 줄을 만든다. 조회만 하고
      * 답에는 안 들어가는 스텝(ID 해소 등)은 비어 있다.
+     *
+     * <p>{@code table} = 이 스텝의 원천 테이블명(akg #44 제안 필드) — 서술 맥락의
+     * 데이터 블록 헤딩과 db-schema 발췌 키가 쓴다. 아직 스키마에 없는 spec 은
+     * null 이고, 소비자는 SQL FROM 파싱({@link SqlRender#tableOf})으로 유도한다.
      */
     public record SkillStep(
             String title,
+            String table,
             String produces,
             String lead,
             String sql,

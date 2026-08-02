@@ -98,4 +98,28 @@ class SqlRenderTest {
                     .isNotEmpty();
         }
     }
+
+    @Test
+    void 단일_테이블_SELECT_의_원천_테이블명을_뽑는다() {
+        assertThat(SqlRender.tableOf(
+                "SELECT a FROM FDC_SENSOR WHERE snsr_id = :id")).isEqualTo("fdc_sensor");
+        assertThat(SqlRender.tableOf(
+                "SELECT d, t FROM fdc_setup_event ORDER BY d, t")).isEqualTo("fdc_setup_event");
+    }
+
+    @Test
+    void 조인_서브쿼리_다중_테이블이면_테이블명을_지어내지_않는다() {
+        assertThat(SqlRender.tableOf("SELECT a FROM t1 JOIN t2 ON t1.x = t2.x")).isNull();
+        assertThat(SqlRender.tableOf("SELECT a FROM t1, t2 WHERE t1.x = t2.x")).isNull();
+        assertThat(SqlRender.tableOf("SELECT a FROM (SELECT a FROM t) WHERE a = 1")).isNull();
+    }
+
+    @Test
+    void 번들_spec_의_스텝_전부가_원천_테이블을_가진다() {
+        // steps[].table 저작 + FROM 폴백 — 어느 쪽이든 데이터 블록 헤딩이 비지 않는다.
+        QueryPool pool = QueryPool.of(SkillRegistry.bundledSpecs());
+        for (QueryPool.Query q : pool.all()) {
+            assertThat(q.table()).as("원천 테이블: %s", q.queryId()).isNotBlank();
+        }
+    }
 }

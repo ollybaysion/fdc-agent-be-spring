@@ -62,7 +62,7 @@ class SkillLoaderTest {
                         new SkillSpec.SkillInput("b", true, "둘째 인자")),
                 List.of(new SkillSpec.SkillDependency("agent-db-plugin", null, null)),
                 List.of(new SkillSpec.SkillStep(
-                        "s", "현재 상태", null, "SELECT 1 FROM t WHERE x = :x AND y = :y",
+                        "s", null, "현재 상태", null, "SELECT 1 FROM t WHERE x = :x AND y = :y",
                         Map.of(
                                 "x", new SkillSpec.BindSource("arg", "a", null, null),
                                 "y", new SkillSpec.BindSource("arg", "b", null, null)),
@@ -201,7 +201,7 @@ class SkillLoaderTest {
     @Test
     void 로드_검증_sql의_bind_변수를_binds가_선언하지_않으면_기동_실패() {
         SkillSpec spec = specOf(List.of(new SkillSpec.SkillStep(
-                "s", "현재 상태", null, "SELECT 1 FROM t WHERE x = :x AND y = :y",
+                "s", null, "현재 상태", null, "SELECT 1 FROM t WHERE x = :x AND y = :y",
                 Map.of("x", new SkillSpec.BindSource("arg", "a", null, null)), null, null)));
         assertThatThrownBy(() -> SkillLoader.loadSkill(spec, NOOP_QUERY))
                 .isInstanceOf(IllegalStateException.class)
@@ -211,7 +211,7 @@ class SkillLoaderTest {
     @Test
     void 로드_검증_sql에_없는_bind를_선언하면_기동_실패() {
         SkillSpec spec = specOf(List.of(new SkillSpec.SkillStep(
-                "s", "현재 상태", null, "SELECT 1 FROM t WHERE x = :x",
+                "s", null, "현재 상태", null, "SELECT 1 FROM t WHERE x = :x",
                 Map.of(
                         "x", new SkillSpec.BindSource("arg", "a", null, null),
                         "ghost", new SkillSpec.BindSource("arg", "a", null, null)),
@@ -224,7 +224,7 @@ class SkillLoaderTest {
     @Test
     void 로드_검증_inputs에_없는_인자를_참조하면_기동_실패() {
         SkillSpec spec = specOf(List.of(new SkillSpec.SkillStep(
-                "s", "현재 상태", null, "SELECT 1 FROM t WHERE x = :x",
+                "s", null, "현재 상태", null, "SELECT 1 FROM t WHERE x = :x",
                 Map.of("x", new SkillSpec.BindSource("arg", "nope", null, null)), null, null)));
         assertThatThrownBy(() -> SkillLoader.loadSkill(spec, NOOP_QUERY))
                 .isInstanceOf(IllegalStateException.class)
@@ -235,7 +235,7 @@ class SkillLoaderTest {
     void 로드_검증_step_참조는_앞_스텝만_허용() {
         // 자기 자신(스텝 0이 스텝 0을) — 미래 참조와 같은 거부.
         SkillSpec spec = specOf(List.of(new SkillSpec.SkillStep(
-                "s", "현재 상태", null, "SELECT 1 FROM t WHERE x = :x",
+                "s", null, "현재 상태", null, "SELECT 1 FROM t WHERE x = :x",
                 Map.of("x", new SkillSpec.BindSource("step", null, 0, "C")), null, null)));
         assertThatThrownBy(() -> SkillLoader.loadSkill(spec, NOOP_QUERY))
                 .isInstanceOf(IllegalStateException.class)
@@ -246,7 +246,7 @@ class SkillLoaderTest {
     void 로드_검증_따옴표_리터럴_속_콜론은_bind가_아니다() {
         // 날짜 마스크 'HH24:MI' 의 ':MI' 가 bind 로 오탐되면 안 된다.
         SkillSpec spec = specOf(List.of(new SkillSpec.SkillStep(
-                "s", "현재 상태", null, "SELECT TO_CHAR(t, 'HH24:MI') FROM d WHERE x = :x",
+                "s", null, "현재 상태", null, "SELECT TO_CHAR(t, 'HH24:MI') FROM d WHERE x = :x",
                 Map.of("x", new SkillSpec.BindSource("arg", "a", null, null)), null, null)));
         assertThat(SkillLoader.loadSkill(spec, NOOP_QUERY).name()).isEqualTo("x_wire");
     }

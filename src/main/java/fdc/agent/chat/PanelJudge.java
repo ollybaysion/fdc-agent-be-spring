@@ -38,9 +38,6 @@ public final class PanelJudge {
     private PanelJudge() {
     }
 
-    /** 서술 요약에 싣는 단계당 행 수 상한 — 전문은 패널에 있고, 서술은 해석이다. */
-    private static final int NARRATION_ROWS = 5;
-
     /**
      * {@code POST /api/fdc/v1/chat/data} 요청 body (demo-fe #163 짝 계약,
      * 느슨하게 수용 — 빠진 필드는 null).
@@ -62,8 +59,20 @@ public final class PanelJudge {
             Map<String, Map<String, String>> picks) {
     }
 
-    /** 종결 서술 지시 — 라벨과 프롬프트에 실을 도착 데이터 요약. */
-    public record Narration(String runLabel, String summary) {
+    /**
+     * 종결 서술 지시 — run 정체와 도착 실물 전부. 판정기는 <b>무엇이 도착해 절차가
+     * 끝났는가</b>만 내놓고, 문장(맥락 섹션) 합성은 {@link NarrationPrompt} 소관이다.
+     */
+    public record Narration(
+            String runLabel, String skill, Map<String, String> args, List<StepArrival> steps) {
+    }
+
+    /**
+     * 도착한 스텝 하나 — 판정 집합의 요약({@code hit})과 행 실물({@code full}).
+     * {@code full} 은 0행이거나 이 요청에 rows 가 안 실렸으면 null 일 수 있다.
+     */
+    public record StepArrival(
+            QueryPool.Query query, SnapshotIndexEntry hit, ChatDataSnapshot full) {
     }
 
     /** 판정 결과 — 응답 페이로드의 재료 전부. */
@@ -412,7 +421,16 @@ public final class PanelJudge {
         if (!terminalWith(steps, run, index, null) || terminalWith(steps, run, index, eventKey)) {
             return null; // 종결이 아니거나, 이 이벤트 없이도 종결이던 절차다.
         }
-        return new Narration(label(run), summary(steps, run, index, rows));
+        List<StepArrival> arrivals = new ArrayList<>();
+        for (QueryPool.Query q : steps) {
+            String key = stepKey(run, q);
+            SnapshotIndexEntry hit = index.get(key);
+            if (hit == null || !hit.arrived()) {
+                continue;
+            }
+            arrivals.add(new StepArrival(q, hit, rows.get(key)));
+        }
+        return new Narration(label(run), run.skill(), run.args(), List.copyOf(arrivals));
     }
 
     /** {@code without} 키를 미도착으로 치고 본 종결 여부. */
@@ -432,41 +450,4 @@ public final class PanelJudge {
         return allArrived;
     }
 
-    /** 서술 프롬프트에 실을 도착 데이터 요약 — 단계별 결과와 값 일부. */
-    private static String summary(
-            List<QueryPool.Query> steps, RunSlot run,
-            Map<String, SnapshotIndexEntry> index, Map<String, ChatDataSnapshot> rows) {
-        List<String> lines = new ArrayList<>();
-        lines.add(ChatPrompt.SECTION_ARRIVED);
-        lines.add("절차: " + label(run));
-        for (QueryPool.Query q : steps) {
-            String key = stepKey(run, q);
-            SnapshotIndexEntry hit = index.get(key);
-            if (hit == null || !hit.arrived()) {
-                continue;
-            }
-            if (hit.isEmptyResult()) {
-                lines.add("- " + q.title() + ": 조회 결과 0행 — 데이터가 없음이 확인됐다.");
-                continue;
-            }
-            ChatDataSnapshot full = rows.get(key);
-            String cols = full != null && full.columns() != null
-                    ? " (" + String.join(", ", full.columns()) + ")"
-                    : hit.columns() != null ? " (" + String.join(", ", hit.columns()) + ")" : "";
-            lines.add("- " + q.title() + ": " + hit.rowCount() + "행" + cols);
-            if (full != null && full.hasRows()) {
-                List<List<String>> sample = full.rows().size() > NARRATION_ROWS
-                        ? full.rows().subList(0, NARRATION_ROWS)
-                        : full.rows();
-                for (List<String> row : sample) {
-                    lines.add("  " + String.join(" | ", row.stream()
-                            .map(c -> c != null ? c : "(null)").toList()));
-                }
-                if (full.rows().size() > sample.size()) {
-                    lines.add("  … 외 " + (full.rows().size() - sample.size()) + "행 (패널에 전문)");
-                }
-            }
-        }
-        return String.join("\n", lines);
-    }
 }

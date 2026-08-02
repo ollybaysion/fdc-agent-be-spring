@@ -19,13 +19,18 @@ import java.util.Map;
  */
 public final class QueryPool {
 
-    /** 풀 항목 하나 = 어느 스킬의 몇 번째 조회인가. */
+    /**
+     * 풀 항목 하나 = 어느 스킬의 몇 번째 조회인가. {@code table} 은 원천 테이블명 —
+     * spec {@code steps[].table} 이 우선이고, 없으면 SQL FROM 파싱으로 유도한다
+     * (둘 다 실패하면 null).
+     */
     public record Query(
             String queryId,
             String skill,
             int step,
             int stepCount,
             String title,
+            String table,
             String produces,
             String sql,
             Map<String, SkillSpec.BindSource> binds,
@@ -77,6 +82,9 @@ public final class QueryPool {
                         i,
                         spec.steps().size(),
                         step.title() != null ? step.title() : (i + 1) + "단계",
+                        step.table() != null && !step.table().isBlank()
+                                ? step.table().trim()
+                                : SqlRender.tableOf(step.sql()),
                         step.produces(),
                         step.sql(),
                         step.binds() != null ? step.binds() : Map.of(),

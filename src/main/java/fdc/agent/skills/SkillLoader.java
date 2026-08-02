@@ -110,8 +110,12 @@ public final class SkillLoader {
         return vars;
     }
 
-    /** 한국어 조사 일치 — foundry 렌더러와 같은 규칙(합성 결과가 갈리지 않도록). */
-    private static boolean hasFinalConsonant(String text) {
+    /**
+     * 한국어 조사 일치 — foundry 렌더러와 같은 규칙(합성 결과가 갈리지 않도록).
+     * public 인 이유: 서술 프롬프트({@link fdc.agent.chat.NarrationPrompt})의 답변
+     * 가이드 머리문장이 같은 골격을 합성한다 — 규칙이 두 벌이면 조사만 갈린다.
+     */
+    public static boolean hasFinalConsonant(String text) {
         String t = text.trim();
         if (t.isEmpty()) {
             return false;
