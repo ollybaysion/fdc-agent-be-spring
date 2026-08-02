@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sun.net.httpserver.HttpServer;
+import fdc.agent.akg.AkgSource.Reload;
 import fdc.agent.skills.AkgSkillSource;
 import fdc.agent.skills.SkillLoader;
 import fdc.agent.skills.SkillRegistry;
@@ -171,5 +172,43 @@ class AkgSkillSourceTest {
         putSkill("fdc-explain-sensor", "허브판 상태", "r1", "active");
         new AkgSkillSource(startStub(), "sekrit", 300);
         assertThat(lastAuth).isEqualTo("Bearer sekrit");
+    }
+
+    @Test
+    void reloadNow는_주기와_무관하게_즉시_반영한다() throws Exception {
+        putSkill("fdc-explain-sensor", "초판 상태", "r1", "active");
+        // refreshSeconds=300 — 주기 타이머로는 이 테스트 동안 재확인이 일어나지 않는다.
+        AkgSkillSource source = new AkgSkillSource(startStub(), null, 300);
+        assertThat(docFetches.get()).isEqualTo(1); // 기동 시 1회
+
+        putSkill("fdc-explain-sensor", "개정판 상태", "r2", "active");
+        source.specs(); // 주기 미도래 → 구판 그대로, 재확인 없음
+        assertThat(docFetches.get()).isEqualTo(1);
+
+        assertThat(source.reloadNow()).isEqualTo(Reload.FETCHED); // 강제 → 즉시 재확인·재fetch
+        assertThat(docFetches.get()).isEqualTo(2);
+        assertThat(SkillLoader.synthesizeDescription(source.specs().get(0)))
+                .contains("개정판 상태");
+    }
+
+    /**
+     * fail-open 이라 허브가 죽어도 예외가 안 나고 스킬도 그대로 산다 — 그래서
+     * 리로드가 실패했다는 사실은 반환값 말고는 알 길이 없다. 여기서 FETCHED 가
+     * 나오면 운영자는 "반영됐다"고 읽는데 실제로는 옛 스냅샷이다(#40).
+     */
+    @Test
+    void 허브에_못_닿으면_hub_unreachable을_돌려준다() throws Exception {
+        putSkill("fdc-explain-sensor", "초판 상태", "r1", "active");
+        AkgSkillSource source = new AkgSkillSource(startStub(), null, 300);
+        List<SkillSpec> before = source.specs();
+
+        server.stop(0);
+        server = null;
+
+        assertThat(source.reloadNow()).isEqualTo(Reload.HUB_UNREACHABLE);
+        // 스냅샷은 유지된다 — 리로드 실패가 서비스를 죽이지 않는다.
+        assertThat(source.specs()).hasSameSizeAs(before);
+        assertThat(SkillLoader.synthesizeDescription(source.specs().get(0)))
+                .contains("초판 상태");
     }
 }

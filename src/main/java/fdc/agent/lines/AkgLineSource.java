@@ -2,6 +2,7 @@ package fdc.agent.lines;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import fdc.agent.akg.AkgSource;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -31,7 +32,7 @@ import org.slf4j.LoggerFactory;
  * <p>status=active 만 수용한다(inactive/archived = 폐기된 라인 — 드롭다운에서 빠져야
  * 하지만 이미 그 라인으로 등록된 설비 카드는 건드리지 않는다).
  */
-public final class AkgLineSource implements LineSource {
+public final class AkgLineSource implements LineSource, AkgSource {
 
     private static final Logger log = LoggerFactory.getLogger(AkgLineSource.class);
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -70,7 +71,21 @@ public final class AkgLineSource implements LineSource {
         return snapshot == null ? List.of() : snapshot;
     }
 
-    private void refresh() {
+    /** 운영용 강제 리로드(#40) — 스킬 쪽과 같은 규율. */
+    @Override
+    public Reload reloadNow() {
+        if (!refreshing.compareAndSet(false, true)) {
+            return Reload.ALREADY_REFRESHING;
+        }
+        try {
+            return refresh() ? Reload.FETCHED : Reload.HUB_UNREACHABLE;
+        } finally {
+            refreshing.set(false);
+        }
+    }
+
+    /** @return 허브에서 받아 스냅샷을 갱신했으면 true, 못 닿아 유지했으면 false. */
+    private boolean refresh() {
         lastAttemptMs = System.currentTimeMillis();
         try {
             JsonNode list = getJson("/api/docs?type=fab-line");
@@ -92,9 +107,11 @@ public final class AkgLineSource implements LineSource {
                 log.info("akg 라인 로드: {}개 ({})", next.size(), base);
             }
             hub = List.copyOf(next);
+            return true;
         } catch (Exception e) {
             log.warn("akg 허브({}) 라인 조회 실패 — {} 유지: {}", base,
                     hub == null ? "빈 목록" : "마지막 스냅샷", e.toString());
+            return false;
         }
     }
 

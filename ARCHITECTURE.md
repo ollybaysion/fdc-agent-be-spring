@@ -58,6 +58,7 @@ fdc-agent-be-spring/
     │   │              # 툴 구현: SnapshotQueryTool · DataRequestTool · InputRequestTool
     │   │              # SnapshotDb(붙여넣은 표 → 임시 SQLite)
     │   │              # QueryKey·QueryProgress(조달 왕복의 조회 키 = 절차 진행)
+    │   ├── akg/      # AkgSource — 허브 fetch 소스 공통 계약(스킬·라인)·리로드 결과
     │   ├── llm/       # LlmClient seam(LlmTypes 내 인터페이스): MockLlm ↔ OpenAiLlm
     │   ├── skills/    # SkillLoader·SkillRegistry — spec.json → 에이전트 툴 컴파일
     │   │              # QueryPool(요청 가능한 조회 목록) · SqlRender(리터럴 SQL 렌더)
@@ -67,6 +68,8 @@ fdc-agent-be-spring/
     │   └── skills/*.spec.json         # ★ spec v2 (형식 진실원 = agent-knowledge-governance)
     ├── test/java/fdc/agent/           # JUnit 110
     ├── scripts/parity.sh              # Node 대조군 잔여 3케이스
+    ├── scripts/{start,stop}.sh        # 백그라운드 기동·종료 (PID 파일 = logs/*.pid)
+    ├── scripts/reload.sh              # POST /admin/reload 호출
     └── docs/phase1-사내-runbook.md    # Oracle 연결 절차 (사내 단계)
 ```
 
@@ -138,9 +141,18 @@ BE 가 DB 에 닿지 못하는 배포에서는 조회가 왕복이 된다: 요�
 ### HTTP 표면 · 문서 포인터
 
 - `GET /health`
+- `POST /admin/reload` — akg 소스(스킬·라인) 강제 리로드(`scripts/reload.sh`).
+  운영 표면이라 제품 문법 밖(`/health` 층). 섹션마다 `source`·`outcome`·`count`
+  를 돌려준다. 리로드는 fail-open 이라 실패해도 예외 없이 옛 스냅샷을 계속
+  서빙하므로, **`outcome` 이 그 사실을 말해주지 않으면 반영 실패가 성공처럼
+  보인다** — `fetched`(받아왔다) / `hub-unreachable`(못 닿아 유지 중) /
+  `already-refreshing`(주기 refresh 가 이미 진행 중) / `not-configured`
+  (akg 미구성)로 가른다.
 - `POST /api/fdc/v1/chat` — SSE `token* → done | error`. 에이전트 실행은
   스트리밍 전 완료(실패는 정상 HTTP 에러로).
 - `GET /api/fdc/v1/skills` — 사람이 고르는 스킬 카탈로그(로드된 spec 목록).
+- `GET /api/fdc/v1/lines` — 설비 카드 라인 드롭다운 목록(akg `fab-line`,
+  미구성이면 빈 목록).
 - 데이터를 돌려주는 정형 조회 GET 은 없다. 설비·챔버·센서를 포함해 **모든 데이터는
   스킬 툴로 조회하거나, 닿지 않으면 `dataRequests` 로 사용자에게 조달을 요청**한다.
   조달 요청도 등재된 스킬 spec 의 조회만 나간다(임의 SQL 없음).
