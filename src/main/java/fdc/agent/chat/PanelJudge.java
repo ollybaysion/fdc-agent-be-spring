@@ -313,9 +313,11 @@ public final class PanelJudge {
             case BindOutcome.Ready ready -> {
                 try {
                     String sql = SqlRender.render(q.sql(), ready.binds());
+                    // 라벨은 스텝 제목만 — 인자는 카드가 앉는 분석 카드(계층)가
+                    // 이미 말하므로 꼬리를 붙이지 않는다(FE 2줄 제목 결정).
                     openRequests.add(new DataRequest(
                             QueryKey.of(slot.skill(), q.step(), slot.args(), q.requiredArgs()),
-                            q.title() + DataRequestTool.argsSuffix(slot.args(), q.requiredArgs()),
+                            q.title(),
                             sql, SqlRender.columnsOf(q.sql()),
                             new RunDecl(slot.skill(), slot.args())));
                 } catch (IllegalArgumentException bad) {
