@@ -230,11 +230,14 @@ footer.derived {
 <!-- CONTENT:START — 아래 예시를 실제 내용으로 교체한다. {{...}}는 전부 채운다.
      블록 어휘·스니펫·확장 규칙은 design.md — 색은 var(--...) 토큰만. -->
 <header>
-  <h1>질문 유형(QT) 분류와 유형별 설계 전략 <span class="badge">v0.3 · 정본 전략</span></h1>
+  <h1>질문 유형(QT) 분류와 유형별 설계 전략 <span class="badge">v0.4 · 정본 전략</span></h1>
   <p class="doc-meta">작성 2026-08-02 · 상태 확정(전략)·초안(세부) · 적용 대상: Inline FDC Agent 백엔드(fdc-agent-be-spring)</p>
   <details class="revlog">
     <summary>개정 로그</summary>
     <ul>
+      <li><b>v0.4</b> (2026-08-02) — §4 전면 개정: 정복 범위를 <b>단일 스킬 우선</b>으로 선언,
+        턴 파이프라인(조달→제공→서술)·실행부 상태 정밀화(검증 체계 + 백로그 4건)·ACI 표면
+        인벤토리와 쟁점 4건·미니 골든셋(단일 스킬 선행판) 추가.</li>
       <li><b>v0.3</b> (2026-08-02) — <b>정본 전략 선언 승격</b>: §0에 전략 선언·행위자 표 추가,
         §8 운영 루프에 행위자(asf·akg·obs·골든셋)와 라우팅 세금 반영, §7에 QT4 실패 폴백 2단 정책.</li>
       <li><b>v0.2</b> (2026-08-02) — §10 참고 문헌에 2025~26 하네스 엔지니어링 문서 4건 보강.</li>
@@ -416,8 +419,89 @@ footer.derived {
     <code class="cite">SkillLoader.runSkill</code>이 <code>steps[].binds</code> 체인을
     결정론으로 실행한다. 배선은 로드 시점에 검증된다(인자 실재 · 앞 스텝만 참조 ·
     SQL <code>:var</code> 정확 일치 — 어긋나면 기동 실패).</p>
-  <p><b>현재 상태</b>: 가동 중. 스킬 수가 적어 라우팅이 전량 노출로도 버티는 구간이다.</p>
-  <p><b>스케일링 전략</b> (스킬이 늘수록 선택 정확도가 무너지는 문제의 대비책, 등록 순서대로):</p>
+  <p><b>현재 상태</b>: 가동 중이되 구간별 지위가 다르다 — 결정론 실행부(코드)는
+    <b>검증 체계가 있고 구멍이 목록으로 열거된</b> 상태, LLM 구간(발동·슬롯·서술)은
+    <b>뭐가 얼마나 안 되는지 말할 측정 수단 자체가 없는</b> 상태다. 정복의 다음 수는
+    후자의 측정 체계(미니 골든셋)다.</p>
+
+  <h3 id="qt1-scope">정복 범위 — 단일 스킬 우선 (2026-08-02 결정)</h3>
+  <p>QT1 정복은 <b>스킬 하나를 잘 돌리는 것</b>부터다. 멀티 스킬 간 선택(라우팅·스케일링)은
+    그 다음 단계의 논의로 분리한다 — 아래 파이프라인은 <b>호출이 이미 확정된 뒤</b>
+    (스킬 결정·절차 결정)의 턴 내부를 다룬다.</p>
+
+  <h3 id="qt1-pipeline">턴 파이프라인 — 조달 → 제공 → 서술</h3>
+  <pre class="diagram">
+조달 ─────────────▶ 제공 ─────────────▶ 서술
+필요한 데이터 확보     확보한 데이터를        증강 LLM이 답변 생성
+                     증강 LLM에 주입
+dev: 스킬 SQL 직접실행  = Retrieval 팔        produces 계약 준수
+restricted: panel-     = ACI 정의 대상        지어내기 금지
+judge 조달(#38·#44)</pre>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>단계</th><th>내용</th><th>주체</th><th>상태</th></tr></thead>
+      <tbody>
+        <tr><td><b>조달</b></td>
+          <td>dev = 스킬 SQL 직접 실행 · restricted(사내) = panel-judge가 결정론 판정으로
+            데이터 요청 카드를 내림(<a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/38">#38</a>,
+            chat/data)</td>
+          <td>코드</td>
+          <td>검증 체계 있음 — 단 백로그 4건(아래)</td></tr>
+        <tr><td><b>제공</b></td>
+          <td>조달된 데이터를 어떤 형태로 모델에 주입하나 — 증강 LLM의 <b>Retrieval</b> 팔.
+            ACI로 정의한다(아래)</td>
+          <td>코드</td>
+          <td>표면은 존재하나 계약 미명문화 · 경로 간 비대칭</td></tr>
+        <tr><td><b>서술</b></td>
+          <td>툴 결과 위에서 답변 생성 — <code>produces</code>(반드시 포함)·avoid 준수</td>
+          <td>LLM</td>
+          <td>측정 없음 — 미니 골든셋 대상</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>조달의 결정론부는 "정복"이 아니라 <b>"구멍이 열거 가능한 상태"</b>가 정확하다.
+    열거된 백로그: ① 컬럼 층위 배선 검증 미구현
+    (<a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/7">#7</a> ②) —
+    로드 검증을 통과하고도 실행 시점에 터질 수 있는 구멍, ② <code>steps[]</code> 의미론
+    이중성(직접 실행 = 첫 행 무조건 바인드, pick 개념 없음)과 <code>branches</code> 죽은
+    필드, ③ 실 Oracle 미실증(fixture만 검증), ④ 조달 경로(#38/#44) 운영 실증 전.</p>
+
+  <h3 id="qt1-aci">ACI 정의 — 제공 단계의 열린 설계 과제</h3>
+  <p>ACI(Agent-Computer Interface, SWE-agent → Anthropic 부록 용어) = <b>모델이 보고 만지는
+    모든 표면</b>. 현재 코드에서 표면은 이미 중앙화되어 있어, 정의 작업은 재구조가 아니라
+    <b>계약 명문화 + 미결정 지점 결정</b>이다:</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>표면</th><th>실물</th><th>현재 계약</th></tr></thead>
+      <tbody>
+        <tr><td>시스템 프롬프트</td><td><code class="cite">ChatPrompt.system</code></td>
+          <td>정체성 + 툴이 스스로 내놓은 <code>guidance()</code> 집계 — 툴 없으면 규율도 안 실림</td></tr>
+        <tr><td>맥락 섹션</td><td><code class="cite">ChatPrompt.contextSection</code></td>
+          <td>마지막 사용자 메시지 앞의 별도 system 메시지 — SCOPE·DATA·PROGRESS·INPUTS
+            4블록, <code>SECTION_*</code> 머리표 상수가 테스트 표식</td></tr>
+        <tr><td>툴 결과 되먹임</td><td><code class="cite">SkillLoader.buildResult</code></td>
+          <td>[조회 결과] + [출력 지침] + produces + [하지 말 것] + [예시] —
+            <b>서술 계약이 툴 결과 안에 실려 감</b></td></tr>
+        <tr><td>툴 노출(이름·설명·스키마)</td><td>spec→컴파일</td>
+          <td>라우팅 편 소관 — 이 문서의 다음 단계 논의</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p><b>결정해야 할 쟁점 4건</b>:</p>
+  <ul>
+    <li><b>push vs pull 비대칭</b> — 직접 실행 결과는 행 전량을 JSON으로 툴 결과에 붓고(push,
+      <code class="cite">SkillLoader.stringify</code>), 첨부/조달 스냅샷은 스키마만 펴고
+      <code>query_snapshot</code>으로 당겨오게 한다(pull, Design B). chat/data 가동 후엔 같은
+      데이터가 출처에 따라 다른 형태로 도달한다 — 통일할지, 비대칭을 의도로 못 박을지.</li>
+    <li><b>push 경로의 행 상한·직렬화 포맷</b> — 현재 무상한. 사내 실DB 이관 전 결정 필요.</li>
+    <li><b>서술 계약의 전달 위치</b> — produces·avoid·예시가 툴 결과에 실리는 현 구조 유지 vs
+      시스템 프롬프트로 이동(멀티턴 이력 오염 고려).</li>
+    <li><b><code>SECTION_*</code> 상수의 지위 승격</b> — ACI 계약의 정식 앵커로 선언.</li>
+  </ul>
+
+  <h3 id="qt1-scaling">스케일링 전략 — 다음 단계 (멀티 스킬 라우팅)</h3>
+  <p>스킬이 늘수록 선택 정확도가 무너지는 문제의 대비책(등록 순서대로). 단일 스킬 정복
+    뒤의 논의다:</p>
   <ul>
     <li><b>L0 결정론 스코프 필터</b>
       (<a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/33">#33</a>) —
@@ -428,8 +512,11 @@ footer.derived {
     <li><b>스키마 쪽 절반 = akg #43</b> — description 골격 v3(notFor·예시·네임스페이스).
       라우팅 신호는 spec이 실어야 하므로 스킬 양산 전에 결정한다.</li>
   </ul>
-  <p><b>측정</b>: top-1 라우팅 정확도·혼동행렬·슬롯 정확도. 스킬을 추가하면
-    <code>output.examples[].ask</code>가 골든셋 케이스로 자동 편입된다 — 테스트가 공짜.</p>
+  <p><b>측정</b>: 단일 스킬 구간은 <b>미니 골든셋</b>(#32의 선행판)부터 — 양성 케이스
+    (<code>output.examples[].ask</code> 재사용), 음성 케이스(QT3 질문에 툴을 안 부르는 게
+    정답), 결핍 케이스(입력 부족 시 <code>request_input</code>이 정답), 서술은
+    <code>produces</code> 포함 여부로 기계 채점. 러너는 #32와 공용으로 설계해 멀티 스킬
+    확장 시 top-1 정확도·혼동행렬로 그대로 넓힌다.</p>
 </section>
 
 <section>
