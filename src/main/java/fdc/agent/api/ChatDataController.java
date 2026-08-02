@@ -29,10 +29,11 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * POST /api/fdc/v1/chat/data — 데이터 패널 판정 인렛(#38, 코드네임 panel-judge).
  * 패널의 모든 수정·입력이 이 인렛을 부르고, {@link PanelJudge} 가 결정론으로
- * 판정한다: 다음 카드는 즉시(LLM 0회), 갈림길은 pick 후보 선언, 절차 종결만
- * 그 자리에서 SSE 로 최종 서술을 스트리밍한다(합성 사용자 발화 없음).
+ * 진행·종결을 판정한다. 요청 카드는 응답에 없다 — 카드 배치·SQL 완성은 FE 가
+ * 카탈로그(binds 포함)로 로컬 판정한다(demo-fe dataList). 절차 종결 전이만
+ * 그 자리에서 SSE 로 최종 서술을 스트리밍한다(합성 사용자 발화 없음, LLM 1회).
  *
- * <p>응답은 항상 SSE — 서술이 있으면 token* → done, 카드만이면 done 만.
+ * <p>응답은 항상 SSE — 서술이 있으면 token* → done, 아니면 done 만.
  * 판정 실패는 스트리밍 시작 전이라 정상 HTTP 상태로 나간다({@code /chat} 과
  * 같은 규율). 대화 라인의 인렛은 전부 {@code /chat/*} 네임스페이스다 — 조달이
  * 별도 채널이 아니라 대화의 일부라는 Inline 명제를 URL 이 그대로 표현한다.
@@ -98,11 +99,8 @@ public class ChatDataController {
                 body.eventId(),
                 body.revision(),
                 pool.rev(),
-                verdict.openRequests(),
                 verdict.runsProgress(),
                 emptyToNull(verdict.terminalRuns()),
-                emptyToNull(verdict.needsRows()),
-                body.picks() == null || body.picks().isEmpty() ? null : body.picks(),
                 text != null ? verdict.narration().runLabel() : null);
 
         Map<String, Object> traceOut = new LinkedHashMap<>();
@@ -169,7 +167,6 @@ public class ChatDataController {
         out.put("snapshots", body.snapshots() == null
                 ? null
                 : body.snapshots().stream().map(ChatController::traceSnapshot).toList());
-        out.put("picks", body.picks());
         out.put("scope", body.scope());
         out.put("inputs", body.inputs());
         out.put("messages", messages.size() + "개");
