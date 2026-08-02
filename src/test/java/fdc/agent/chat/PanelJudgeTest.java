@@ -81,6 +81,8 @@ class PanelJudgeTest {
         assertThat(v.openRequests()).hasSize(1);
         assertThat(v.openRequests().get(0).queryKey()).isEqualTo(KEY0);
         assertThat(v.openRequests().get(0).sql()).contains("id = 'X-1'").doesNotContain(":id");
+        // 카드의 소속(run) — FE 가 설비→분석 계층에 앉히는 근거. 선언 원문이 그대로 돌아온다.
+        assertThat(v.openRequests().get(0).run()).isEqualTo(declared().get(0));
         assertThat(v.runsProgress()).hasSize(1);
         assertThat(v.runsProgress().get(0).nextStep()).isEqualTo(0);
         assertThat(v.runsProgress().get(0).terminal()).isFalse();

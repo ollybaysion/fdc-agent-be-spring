@@ -316,7 +316,8 @@ public final class PanelJudge {
                     openRequests.add(new DataRequest(
                             QueryKey.of(slot.skill(), q.step(), slot.args(), q.requiredArgs()),
                             q.title() + DataRequestTool.argsSuffix(slot.args(), q.requiredArgs()),
-                            sql, SqlRender.columnsOf(q.sql())));
+                            sql, SqlRender.columnsOf(q.sql()),
+                            new RunDecl(slot.skill(), slot.args())));
                 } catch (IllegalArgumentException bad) {
                     holds.add(new RunProgress.StepHold(q.queryId(),
                             "조회 문장을 완성하지 못했습니다: " + bad.getMessage()));

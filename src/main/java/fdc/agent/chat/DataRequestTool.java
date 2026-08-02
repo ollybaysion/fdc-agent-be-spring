@@ -2,6 +2,7 @@ package fdc.agent.chat;
 
 import fdc.agent.contract.ChatDataSnapshot;
 import fdc.agent.contract.DataRequest;
+import fdc.agent.contract.RunDecl;
 import fdc.agent.skills.QueryPool;
 import fdc.agent.skills.SqlRender;
 import java.util.ArrayList;
@@ -145,7 +146,8 @@ public final class DataRequestTool implements AgentTool {
         }
 
         String label = query.title() + argsSuffix(runArgs, query.requiredArgs());
-        collected.add(new DataRequest(queryKey, label, sql, SqlRender.columnsOf(query.sql())));
+        collected.add(new DataRequest(queryKey, label, sql, SqlRender.columnsOf(query.sql()),
+                new RunDecl(query.skill(), runArgs)));
         return ToolResult.of("데이터 요청을 등록했습니다: " + label
                 + ". 데이터 패널 카드의 SQL 을 실행해 결과를 붙여넣어 등록해 주세요"
                 + " — 조회 결과가 없으면 \"결과 없음\"으로 등록하시면 그것도 사실로 받습니다."
