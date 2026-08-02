@@ -1,5 +1,6 @@
 package fdc.agent.skills;
 
+import fdc.agent.util.Js;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -115,6 +116,19 @@ public final class QueryPool {
     /** 같은 스킬의 조회들(단계 순). */
     public List<Query> stepsOf(String skill) {
         return all.stream().filter(q -> q.skill().equals(skill)).toList();
+    }
+
+    /**
+     * 풀 내용 지문 — 같은 스킬 목록이면 같은 값. 스킬 출처가 시변이라(akg 주기
+     * refresh) 같은 요청 body 가 다른 판정을 받을 수 있는데, 응답에 이 지문을
+     * echo 해 FE 가 그 갈림을 감지한다(#38 T14).
+     */
+    public String rev() {
+        StringBuilder sb = new StringBuilder();
+        for (Query q : all) {
+            sb.append(q.queryId()).append('|').append(q.sql()).append('\n');
+        }
+        return Long.toString(Js.hash(sb.toString()), 36);
     }
 
     /**

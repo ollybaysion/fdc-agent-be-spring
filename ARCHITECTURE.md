@@ -140,6 +140,11 @@ BE 가 DB 에 닿지 못하는 배포에서는 조회가 왕복이 된다: 요�
 - `GET /health`
 - `POST /api/fdc/v1/chat` — SSE `token* → done | error`. 에이전트 실행은
   스트리밍 전 완료(실패는 정상 HTTP 에러로).
+- `POST /api/fdc/v1/chat/data` — 데이터 패널 판정 인렛(panel-judge, #38). 패널의
+  수정·입력마다 호출되고 `PanelJudge` 가 무상태 결정론으로 판정한다: 바인드가 준비된
+  미도착 스텝 전부를 SQL 완성본 카드(`openRequests`, 전체 리컨사일)로, 갈림길은
+  `needsPick` 후보 선언으로, 절차 종결 전이만 그 응답의 SSE `token*` 으로 최종 서술
+  (LLM 은 서술 한 곳에만 남는다). 대화 인렛은 전부 `/chat/*` 네임스페이스다.
 - `GET /api/fdc/v1/skills` — 사람이 고르는 스킬 카탈로그(로드된 spec 목록).
 - 데이터를 돌려주는 정형 조회 GET 은 없다. 설비·챔버·센서를 포함해 **모든 데이터는
   스킬 툴로 조회하거나, 닿지 않으면 `dataRequests` 로 사용자에게 조달을 요청**한다.
