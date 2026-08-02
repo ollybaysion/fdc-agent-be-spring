@@ -62,6 +62,11 @@ public class MockLlm implements LlmClient {
         if (question.contains("후속 질문 3개")) {
             return new LlmTurn.Final(followupSuggestions(messages));
         }
+        // 종결 서술 지시(/chat/data) — 실 모델이 해석·결론을 쓸 자리를 목은 도착 요약을
+        // 결정적으로 되읽어 흉내낸다. 제한망 1차 배포가 바로 이 경로다(#38 T6).
+        if (question.contains(ChatPrompt.SECTION_ARRIVED)) {
+            return new LlmTurn.Final(narration(question));
+        }
         LlmToolCall call = planCall(question, contextSection(messages), tools);
         if (call != null) {
             return new LlmTurn.ToolCalls(List.of(call));
@@ -240,6 +245,16 @@ public class MockLlm implements LlmClient {
                     + " \"조회 결과가 없으면 어떻게 되나요?\"]";
         }
         return "[\"S-0004 조회 SQL 로 요청해줘\", \"CVD-01 측정 분석해줘\", \"이 데이터로 정리해줘\"]";
+    }
+
+    /** 서술 지시 메시지에서 절차·단계 줄만 되읽어 결정적 종결 서술을 만든다. */
+    private static String narration(String question) {
+        List<String> lines = question.lines()
+                .filter(l -> l.startsWith("절차: ") || l.startsWith("- "))
+                .toList();
+        return "요청하신 조회 절차가 완료됐습니다.\n" + String.join("\n", lines)
+                + "\n\n위 결과가 도착한 데이터의 전부입니다 — 값 전문은 데이터 패널에서 확인하세요. "
+                + "(온프렘 LLM 미설정 시 mock 서술)";
     }
 
     private static String genericAnswer(String text) {

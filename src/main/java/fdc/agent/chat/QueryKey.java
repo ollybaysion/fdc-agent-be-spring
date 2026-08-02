@@ -40,6 +40,18 @@ public final class QueryKey {
      */
     public static String of(String skill, int step, Map<String, String> args, List<String> argNames) {
         StringBuilder key = new StringBuilder(skill).append('#').append(step);
+        String part = argsPart(args, argNames);
+        if (!part.isEmpty()) {
+            key.append("__").append(part);
+        }
+        return key.toString();
+    }
+
+    /**
+     * run 이름표만 — 인자 원문({@code runs[].args})으로 선언된 절차를 도착 스냅샷의
+     * 키와 같은 표기로 대조할 때 쓴다. 인자가 없으면 빈 문자열.
+     */
+    public static String argsPart(Map<String, String> args, List<String> argNames) {
         List<String> parts = new java.util.ArrayList<>();
         for (String name : argNames) {
             String value = args != null ? args.get(name) : null;
@@ -47,10 +59,7 @@ public final class QueryKey {
                 parts.add(name + "=" + sanitize(value));
             }
         }
-        if (!parts.isEmpty()) {
-            key.append("__").append(String.join("&", parts));
-        }
-        return key.toString();
+        return String.join("&", parts);
     }
 
     /** 풀 형식이 아닌 키(옛 자유 저작 스냅샷 등)는 {@code null} — 진행 유도에서 조용히 빠진다. */

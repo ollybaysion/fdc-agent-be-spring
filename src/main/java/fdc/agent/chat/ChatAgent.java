@@ -1,5 +1,7 @@
 package fdc.agent.chat;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import fdc.agent.chat.AgentTool.ToolResult;
@@ -56,6 +58,21 @@ public class ChatAgent {
 
     /** 대화 히스토리 한 줄(FE 계약 느슨하게 수용). */
     public record HistoryMessage(Role role, String content) {
+
+        /**
+         * 모르는 role(FE 의 {@code "error"} 등)은 400 대신 {@code role=null} 로 받아
+         * 컨트롤러가 드롭한다(#38 T11) — 자동 호출 경로에서 메시지 하나가 대화
+         * 전체를 무음 고장내지 않게.
+         */
+        @JsonCreator
+        public static HistoryMessage fromJson(
+                @JsonProperty("role") String role, @JsonProperty("content") String content) {
+            try {
+                return new HistoryMessage(Role.from(role), content);
+            } catch (IllegalArgumentException unknownRole) {
+                return new HistoryMessage(null, content);
+            }
+        }
     }
 
     /**

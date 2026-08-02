@@ -43,15 +43,21 @@ public class SkillsController {
                     step.binds() != null ? step.binds() : Map.of();
             Map<String, String> argBinds = new LinkedHashMap<>();
             List<String> priorStepBinds = new ArrayList<>();
+            Map<String, SkillCatalog.Bind> wiring = new LinkedHashMap<>();
             for (Map.Entry<String, SkillSpec.BindSource> e : binds.entrySet()) {
-                if ("arg".equals(e.getValue().from())) {
-                    argBinds.put(e.getKey(), e.getValue().arg());
+                SkillSpec.BindSource src = e.getValue();
+                if ("arg".equals(src.from())) {
+                    argBinds.put(e.getKey(), src.arg());
+                    wiring.put(e.getKey(), new SkillCatalog.Bind("arg", src.arg(), null, null));
                 } else {
                     priorStepBinds.add(e.getKey());
+                    wiring.put(e.getKey(),
+                            new SkillCatalog.Bind("step", null, src.step(), src.column()));
                 }
             }
             steps.add(new SkillCatalog.Step(
-                    step.title(), step.produces(), step.sql(), argBinds, priorStepBinds));
+                    step.title(), step.produces(), step.sql(), argBinds, priorStepBinds,
+                    wiring));
         }
 
         return new SkillCatalog.Entry(

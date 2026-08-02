@@ -1,6 +1,5 @@
 package fdc.agent.api;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import fdc.agent.chat.ChatAgent;
 import fdc.agent.chat.ChatAgent.AgentResult;
 import fdc.agent.chat.ChatAgent.HistoryMessage;
@@ -13,7 +12,6 @@ import fdc.agent.util.Trace;
 import jakarta.servlet.ServletOutputStream;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,11 +32,10 @@ import org.springframework.web.bind.annotation.RestController;
 public class ChatController {
 
     private static final Logger log = LoggerFactory.getLogger(ChatController.class);
-    private static final ObjectMapper JSON = new ObjectMapper();
 
-    // API.md §1 입력 한도 (서버측 재적용).
-    private static final int MAX_MESSAGES = 100;
-    private static final int MAX_MESSAGE_CONTENT_CHARS = 10_000;
+    // API.md §1 입력 한도 (서버측 재적용) — /chat/data 인렛도 같은 한도를 쓴다.
+    static final int MAX_MESSAGES = 100;
+    static final int MAX_MESSAGE_CONTENT_CHARS = 10_000;
 
     // 타이핑 연출 간격·총 지연 상한은 설정이다 — AppProps.Chat 참고.
 
@@ -74,31 +71,18 @@ public class ChatController {
     @PostMapping("/api/fdc/v1/chat")
     public void chat(@RequestBody(required = false) ChatBody body, HttpServletResponse res)
             throws IOException {
-        List<HistoryMessage> messages = body != null && body.messages() != null
+        List<HistoryMessage> messages = knownRoles(body != null && body.messages() != null
                 ? body.messages()
-                : List.of();
+                : List.of());
 
         if (messages.isEmpty()) {
-            writeJson(res, 400, Map.of("error", "messages_required"));
+            SseSupport.writeJson(res, 400, Map.of("error", "messages_required"));
             return;
         }
-        if (messages.size() > MAX_MESSAGES) {
-            Map<String, Object> err = new LinkedHashMap<>();
-            err.put("error", "messages_too_many");
-            err.put("limit", MAX_MESSAGES);
-            err.put("actual", messages.size());
-            writeJson(res, 400, err);
+        Map<String, Object> limitError = messageLimitError(messages);
+        if (limitError != null) {
+            SseSupport.writeJson(res, 400, limitError);
             return;
-        }
-        for (HistoryMessage m : messages) {
-            if (m != null && m.content() != null && m.content().length() > MAX_MESSAGE_CONTENT_CHARS) {
-                Map<String, Object> err = new LinkedHashMap<>();
-                err.put("error", "message_content_too_long");
-                err.put("limit", MAX_MESSAGE_CONTENT_CHARS);
-                err.put("actual", m.content().length());
-                writeJson(res, 400, err);
-                return;
-            }
         }
 
         traceRequest(body, messages);
@@ -117,7 +101,7 @@ public class ChatController {
             out.put("message", props.isProd() || err.getMessage() == null
                     ? "chat failed"
                     : err.getMessage());
-            writeJson(res, statusCode, out);
+            SseSupport.writeJson(res, statusCode, out);
             return;
         }
 
@@ -137,11 +121,7 @@ public class ChatController {
         traceOut.put("done", donePayload);
         Trace.emit("BE→FE 응답 (SSE token* + done)", traceOut);
 
-        res.setStatus(200);
-        res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
-        res.setHeader("Cache-Control", "no-cache, no-transform");
-        res.setHeader("Connection", "keep-alive");
-        // X-Request-Id / X-Fdc-Data-Source 는 RequestIdFilter 가 이미 실었다.
+        SseSupport.sseHeaders(res);
 
         ServletOutputStream out = res.getOutputStream();
         try {
@@ -151,17 +131,43 @@ public class ChatController {
             long interval = props.chat().intervalFor(codePoints.length);
             for (int cp : codePoints) {
                 String ch = new String(Character.toChars(cp));
-                write(out, sse("token", Map.of("content", ch)));
+                SseSupport.write(out, SseSupport.sse("token", Map.of("content", ch)));
                 res.flushBuffer();
-                sleep(interval);
+                SseSupport.sleep(interval);
             }
-            write(out, sse("done", donePayload));
+            SseSupport.write(out, SseSupport.sse("done", donePayload));
         } catch (Exception err) {
             log.error("chat stream error", err);
-            write(out, sse("error", Map.of("message", "stream error")));
+            SseSupport.write(out, SseSupport.sse("error", Map.of("message", "stream error")));
         } finally {
             res.flushBuffer();
         }
+    }
+
+    /** 모르는 role 의 메시지는 드롭(#38 T11) — 한 줄이 섞였다고 대화 전체가 400 으로 죽지 않게. */
+    static List<HistoryMessage> knownRoles(List<HistoryMessage> messages) {
+        return messages.stream().filter(m -> m != null && m.role() != null).toList();
+    }
+
+    /** 메시지 한도 위반이면 400 body, 아니면 null — /chat 과 /chat/data 가 공유한다. */
+    static Map<String, Object> messageLimitError(List<HistoryMessage> messages) {
+        if (messages.size() > MAX_MESSAGES) {
+            Map<String, Object> err = new LinkedHashMap<>();
+            err.put("error", "messages_too_many");
+            err.put("limit", MAX_MESSAGES);
+            err.put("actual", messages.size());
+            return err;
+        }
+        for (HistoryMessage m : messages) {
+            if (m.content() != null && m.content().length() > MAX_MESSAGE_CONTENT_CHARS) {
+                Map<String, Object> err = new LinkedHashMap<>();
+                err.put("error", "message_content_too_long");
+                err.put("limit", MAX_MESSAGE_CONTENT_CHARS);
+                err.put("actual", m.content().length());
+                return err;
+            }
+        }
+        return null;
     }
 
     /**
@@ -184,7 +190,7 @@ public class ChatController {
     }
 
     /** 스냅샷 한 건의 트레이스 뷰 — 행은 앞 {@value #TRACE_SNAPSHOT_ROWS} 개까지. */
-    private static Map<String, Object> traceSnapshot(ChatDataSnapshot s) {
+    static Map<String, Object> traceSnapshot(ChatDataSnapshot s) {
         Map<String, Object> out = new LinkedHashMap<>();
         if (s == null) {
             return out;
@@ -204,33 +210,4 @@ public class ChatController {
         return out;
     }
 
-    private static String sse(String event, Object data) {
-        try {
-            return "event: " + event + "\ndata: " + JSON.writeValueAsString(data) + "\n\n";
-        } catch (IOException e) {
-            throw new ApiException(500, "internal", "SSE 직렬화 실패: " + e.getMessage());
-        }
-    }
-
-    private static void write(ServletOutputStream out, String chunk) throws IOException {
-        out.write(chunk.getBytes(StandardCharsets.UTF_8));
-    }
-
-    private static void sleep(long ms) {
-        if (ms <= 0) {
-            return;
-        }
-        try {
-            Thread.sleep(ms);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-    }
-
-    private void writeJson(HttpServletResponse res, int status, Map<String, ?> body)
-            throws IOException {
-        res.setStatus(status);
-        res.setHeader("Content-Type", "application/json; charset=utf-8");
-        res.getOutputStream().write(JSON.writeValueAsBytes(body));
-    }
 }

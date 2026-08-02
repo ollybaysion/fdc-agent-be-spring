@@ -2,8 +2,8 @@ package fdc.agent.chat;
 
 import fdc.agent.contract.ChatDataSnapshot;
 import fdc.agent.contract.DataRequest;
+import fdc.agent.contract.RunDecl;
 import fdc.agent.skills.QueryPool;
-import fdc.agent.skills.SkillSpec;
 import fdc.agent.skills.SqlRender;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -38,9 +38,6 @@ import java.util.Set;
 public final class DataRequestTool implements AgentTool {
 
     public static final String NAME = "request_data";
-
-    /** 여러 값 중 고르라고 되먹일 때 보여 줄 후보 수 상한. */
-    private static final int MAX_CANDIDATES = 10;
 
     private final QueryPool pool;
     private final QueryProgress progress;
@@ -132,13 +129,13 @@ public final class DataRequestTool implements AgentTool {
             return ToolResult.of("이번 응답에서 이미 요청한 데이터입니다: " + query.title());
         }
 
-        Map<String, String> binds;
-        try {
-            binds = resolveBinds(query, runArgs, ToolArgs.map(args, "pick"));
-        } catch (IllegalArgumentException blocked) {
+        BindOutcome outcome = BindResolver.resolve(
+                query, runArgs, ToolArgs.map(args, "pick"), progress::arrived);
+        if (!(outcome instanceof BindOutcome.Ready ready)) {
             requested.remove(queryKey); // 나가지 못한 요청은 재시도를 막지 않는다.
-            return ToolResult.of(blocked.getMessage());
+            return ToolResult.of(prose(outcome));
         }
+        Map<String, String> binds = ready.binds();
 
         String sql;
         try {
@@ -149,7 +146,8 @@ public final class DataRequestTool implements AgentTool {
         }
 
         String label = query.title() + argsSuffix(runArgs, query.requiredArgs());
-        collected.add(new DataRequest(queryKey, label, sql, SqlRender.columnsOf(query.sql())));
+        collected.add(new DataRequest(queryKey, label, sql, SqlRender.columnsOf(query.sql()),
+                new RunDecl(query.skill(), runArgs)));
         return ToolResult.of("데이터 요청을 등록했습니다: " + label
                 + ". 데이터 패널 카드의 SQL 을 실행해 결과를 붙여넣어 등록해 주세요"
                 + " — 조회 결과가 없으면 \"결과 없음\"으로 등록하시면 그것도 사실로 받습니다."
@@ -189,89 +187,25 @@ public final class DataRequestTool implements AgentTool {
     }
 
     /**
-     * SQL 에 박을 값들. {@code from:"arg"} 는 인자에서, {@code from:"step"} 은 <b>도착한
-     * 앞 단계 스냅샷에서</b> 읽는다.
-     *
-     * @throws IllegalArgumentException 이어갈 수 없는 사유(그대로 모델에 되먹인다)
+     * 타입 결과({@link BindResolver}) → 모델에 되먹일 프로즈. 문구는 해석기 분리
+     * 전과 동일하다 — 모델·테스트가 붙는 표면을 리팩터가 흔들지 않는다.
      */
-    private Map<String, String> resolveBinds(
-            QueryPool.Query query, Map<String, String> runArgs, Map<String, String> pick) {
-        Map<String, String> binds = new LinkedHashMap<>();
-        for (Map.Entry<String, SkillSpec.BindSource> e : query.binds().entrySet()) {
-            SkillSpec.BindSource src = e.getValue();
-            if ("arg".equals(src.from())) {
-                String value = runArgs.get(src.arg());
-                if (value == null || value.isBlank()) {
-                    throw new IllegalArgumentException("인자 " + src.arg() + " 값이 필요합니다.");
-                }
-                binds.put(e.getKey(), value);
-                continue;
-            }
-            binds.put(e.getKey(), fromEarlierStep(query, runArgs, pick, src));
-        }
-        return binds;
-    }
-
-    /** 앞 단계 스냅샷에서 한 값을 고른다 — 1행이면 그대로, 여러 행이면 pick, 없으면 중단. */
-    private String fromEarlierStep(
-            QueryPool.Query query, Map<String, String> runArgs, Map<String, String> pick,
-            SkillSpec.BindSource src) {
-        if (src.step() == null) {
-            // 로드 시 검증(SkillLoader.validateBinds)이 걸렀어야 할 spec — 조용히 이상한
-            // 문장을 만드느니 여기서 멈춘다.
-            throw new IllegalArgumentException("이 조회의 배선이 온전하지 않아 요청할 수 없습니다.");
-        }
-        int step = src.step();
-        String sourceKey = QueryKey.of(query.skill(), step, runArgs, query.requiredArgs());
-        ChatDataSnapshot source = progress.arrived(sourceKey);
-        if (source == null) {
-            throw new IllegalArgumentException((step + 1) + "단계 결과가 먼저 필요합니다 — queryId=\""
-                    + query.skill() + "#" + step + "\" 을 먼저 요청하세요.");
-        }
-        if (source.isEmptyResult()) {
-            throw new IllegalArgumentException((step + 1) + "단계 조회 결과가 0행이라 이어갈 수 없습니다"
-                    + " — 데이터가 없다는 사실로 답하세요.");
-        }
-
-        List<String> values = QueryProgress.valuesOf(source, src.column());
-        if (values.isEmpty()) {
-            throw new IllegalArgumentException((step + 1) + "단계 결과에서 " + src.column()
-                    + " 컬럼 값을 찾지 못했습니다 — 붙여넣은 표에 그 컬럼이 있는지 확인해 주세요.");
-        }
-
-        String picked = pick.get(src.column());
-        if (picked == null) {
-            for (Map.Entry<String, String> p : pick.entrySet()) {
-                if (p.getKey().equalsIgnoreCase(src.column())) {
-                    picked = p.getValue();
-                    break;
-                }
-            }
-        }
-        if (picked != null) {
-            for (String v : values) {
-                if (v.equalsIgnoreCase(picked)) {
-                    return v; // 표에 있는 값만 통과 — 고르되 지어내지는 못한다.
-                }
-            }
-            throw new IllegalArgumentException("pick 한 " + src.column() + "=" + picked
-                    + " 은 " + (step + 1) + "단계 결과에 없는 값입니다. " + candidates(values));
-        }
-        if (values.size() > 1) {
-            throw new IllegalArgumentException((step + 1) + "단계 결과의 " + src.column()
-                    + " 이 여러 값입니다 — pick 으로 하나를 고르세요. " + candidates(values));
-        }
-        return values.get(0);
-    }
-
-    private static String candidates(List<String> values) {
-        List<String> shown = values.size() > MAX_CANDIDATES ? values.subList(0, MAX_CANDIDATES) : values;
-        return "가능한 값: " + String.join(", ", shown)
-                + (values.size() > shown.size() ? " 외 " + (values.size() - shown.size()) + "개" : "");
+    private static String prose(BindOutcome outcome) {
+        return switch (outcome) {
+            case BindOutcome.MissingUpstream m -> (m.step() + 1) + "단계 결과가 먼저 필요합니다"
+                    + " — queryId=\"" + m.queryId() + "\" 을 먼저 요청하세요.";
+            case BindOutcome.EmptyUpstream e -> (e.step() + 1) + "단계 조회 결과가 0행이라 이어갈 수 없습니다"
+                    + " — 데이터가 없다는 사실로 답하세요.";
+            case BindOutcome.NeedPick p -> (p.step() + 1) + "단계 결과의 " + p.column()
+                    + " 이 여러 값입니다 — pick 으로 하나를 고르세요. "
+                    + BindResolver.candidates(p.candidates());
+            case BindOutcome.Blocked b -> b.reason();
+            case BindOutcome.Ready r -> throw new IllegalStateException("Ready 는 되먹일 사유가 없다");
+        };
     }
 
     /** 카드 라벨 꼬리 — 같은 조회가 대상만 다를 때 사람이 구분할 수 있게. */
-    private static String argsSuffix(Map<String, String> args, List<String> names) {
+    static String argsSuffix(Map<String, String> args, List<String> names) {
         List<String> parts = new ArrayList<>();
         for (String name : names) {
             String value = args.get(name);

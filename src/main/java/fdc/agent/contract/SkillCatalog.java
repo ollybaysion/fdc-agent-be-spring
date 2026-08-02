@@ -49,12 +49,26 @@ public record SkillCatalog(List<Entry> skills) {
      * {@code argBinds}(bind 이름 → 스킬 인자 이름)가 있어야 FE 가 사용자가 채운 값으로
      * 그 자리를 메울 수 있고, {@code priorStepBinds} 의 bind 는 <b>앞 스텝 결과</b>에서
      * 오므로 FE 가 채울 수 없다 — 그 카드는 "앞 조회가 먼저" 라고 알려야 한다.
+     *
+     * <p>{@code binds} 는 배선 전문이다 — bind 이름마다 어느 인자, 또는 어느 스텝의
+     * 어느 컬럼이 채우는지. FE 가 판정 왕복 없이 스텝 상태(미정/요청 가능)를 스스로
+     * 파생하는 데 쓴다(dataList). {@code argBinds}/{@code priorStepBinds} 는 이것의
+     * 요약 뷰로 남는다 — 소비자가 옮겨 가면 걷는다.
      */
     public record Step(
             String title,
             @JsonInclude(JsonInclude.Include.NON_NULL) String produces,
             String sql,
             Map<String, String> argBinds,
-            List<String> priorStepBinds) {
+            List<String> priorStepBinds,
+            Map<String, Bind> binds) {
+    }
+
+    /** bind 하나의 배선 — from="arg" 면 {@code arg} 가, from="step" 이면 {@code step}+{@code column} 이 찬다. */
+    public record Bind(
+            String from,
+            @JsonInclude(JsonInclude.Include.NON_NULL) String arg,
+            @JsonInclude(JsonInclude.Include.NON_NULL) Integer step,
+            @JsonInclude(JsonInclude.Include.NON_NULL) String column) {
     }
 }

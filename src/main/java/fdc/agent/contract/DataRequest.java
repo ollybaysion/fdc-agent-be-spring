@@ -10,10 +10,15 @@ import java.util.List;
  * 스냅샷이 {@code queryKey} 로 등록돼, 다음 요청에서 충족 여부가 판정된다.
  *
  * <p>{@code sql}·{@code columns} 는 선택 — 없으면 JSON 에서 생략한다.
+ *
+ * <p>{@code run} 은 이 카드가 속한 절차 실행(스킬+원문 인자). FE 가 카드를 설비→분석
+ * 계층에 앉히는 근거다 — {@code queryKey} 는 손실 인코딩이라 여기서 역파싱하면 안
+ * 되고, 소속은 이 필드가 정본이다.
  */
 public record DataRequest(
         String queryKey,
         String label,
         @JsonInclude(JsonInclude.Include.NON_NULL) String sql,
-        @JsonInclude(JsonInclude.Include.NON_NULL) List<String> columns) {
+        @JsonInclude(JsonInclude.Include.NON_NULL) List<String> columns,
+        @JsonInclude(JsonInclude.Include.NON_NULL) RunDecl run) {
 }
