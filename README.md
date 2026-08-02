@@ -49,6 +49,19 @@ export JAVA_HOME=/path/to/jdk-21
 ./gradlew test             # 테스트 44개
 ```
 
+띄워놓고 쓸 때(데모·사내 검증)는 스크립트 쪽이 편하다. 백그라운드로 올리고
+`/health` 가 응답할 때까지 기다렸다가 알려주며, PID 파일을 남겨 **자기가 띄운
+프로세스만** 내린다(이름 패턴 `pkill` 로 남의 서버까지 죽이지 않는다).
+
+```bash
+./scripts/start.sh         # 빌드 후 백그라운드 기동 (SKIP_BUILD=1 이면 기존 jar)
+./scripts/stop.sh          # SIGTERM → 20초 대기 → SIGKILL
+./scripts/reload.sh        # akg 스킬·라인 즉시 리로드 (POST /admin/reload)
+```
+
+레포 루트에 `.env` 가 있으면 `start.sh` 가 읽어 넘긴다 — 셸에 이미 있는 값이
+우선이라 `PORT=9090 ./scripts/start.sh` 같은 일회성 덮어쓰기가 그대로 먹는다.
+
 환경 변수(이름은 Node 판 `.env` 계약 그대로):
 
 ```text
@@ -87,7 +100,10 @@ demo-fe 쪽은 `BACKEND_URL=http://<host>:8080` — **오리진만**, `/api/fdc/
 ## HTTP 표면
 
 - `GET /health`
+- `POST /admin/reload` — akg 스킬·라인 강제 리로드(운영 표면, `scripts/reload.sh`)
 - `POST /api/fdc/v1/chat` — SSE `token* → done | error`
+
+전체 목록과 각 표면의 계약은 `ARCHITECTURE.md` 의 「HTTP 표면」 절이 갖는다.
 
 정형 조회 GET 은 없다. 설비·챔버·센서를 포함해 모든 데이터는 **도메인 스킬
 툴로 조회**하고, 스킬로 닿지 않으면 `done.dataRequests` 로 사용자에게 조달을

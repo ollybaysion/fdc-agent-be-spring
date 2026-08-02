@@ -67,6 +67,8 @@ fdc-agent-be-spring/
     │   └── skills/*.spec.json         # ★ spec v2 (형식 진실원 = agent-knowledge-governance)
     ├── test/java/fdc/agent/           # JUnit 110
     ├── scripts/parity.sh              # Node 대조군 잔여 3케이스
+    ├── scripts/{start,stop}.sh        # 백그라운드 기동·종료 (PID 파일 = logs/*.pid)
+    ├── scripts/reload.sh              # POST /admin/reload 호출
     └── docs/phase1-사내-runbook.md    # Oracle 연결 절차 (사내 단계)
 ```
 
@@ -138,8 +140,10 @@ BE 가 DB 에 닿지 못하는 배포에서는 조회가 왕복이 된다: 요�
 ### HTTP 표면 · 문서 포인터
 
 - `GET /health`
-- `POST /admin/reload` — akg 소스(스킬·라인) 강제 리로드. 운영 표면이라 제품
-  문법 밖(`/health` 층). akg 미구성이면 `reloaded:false` 로 보고만 한다.
+- `POST /admin/reload` — akg 소스(스킬·라인) 강제 리로드(`scripts/reload.sh`).
+  운영 표면이라 제품 문법 밖(`/health` 층). akg 미구성이면 `reloaded:false` 로
+  보고만 한다. 응답의 `reloaded` 는 *시도했다*는 뜻 — 허브에 못 닿아도 true 이고
+  기존 스냅샷이 유지된다(fail-open). 실패는 서버 로그 warn 에만 남는다.
 - `POST /api/fdc/v1/chat` — SSE `token* → done | error`. 에이전트 실행은
   스트리밍 전 완료(실패는 정상 HTTP 에러로).
 - `GET /api/fdc/v1/skills` — 사람이 고르는 스킬 카탈로그(로드된 spec 목록).
