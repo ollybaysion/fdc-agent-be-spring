@@ -2,6 +2,7 @@ package fdc.agent.skills;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import fdc.agent.akg.AkgSource;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
@@ -37,7 +38,7 @@ import org.slf4j.LoggerFactory;
  * domain-skill 은 keyword-docs 주입 인덱스에 의도적으로 없으므로
  * {@code /api/index/:type} 이 아니라 문서 목록 API 를 쓴다.
  */
-public final class AkgSkillSource implements SkillSource {
+public final class AkgSkillSource implements SkillSource, AkgSource {
 
     private static final Logger log = LoggerFactory.getLogger(AkgSkillSource.class);
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -84,22 +85,23 @@ public final class AkgSkillSource implements SkillSource {
 
     /**
      * 운영용 강제 리로드(#40) — refresh 주기와 무관하게 즉시 1회 재확인한다.
-     * 동시 refresh 가 진행 중이면 건너뛰고 false — 그쪽이 이미 최신을 가져온다.
-     * 실패 정책은 주기 refresh 와 동일(fail-open, 기존 스냅샷 유지).
+     * 실패 정책은 주기 refresh 와 동일(fail-open, 기존 스냅샷 유지)이라 결과는
+     * 예외가 아니라 반환값으로 나온다.
      */
-    public boolean reloadNow() {
+    @Override
+    public Reload reloadNow() {
         if (!refreshing.compareAndSet(false, true)) {
-            return false;
+            return Reload.ALREADY_REFRESHING;
         }
         try {
-            refresh();
-            return true;
+            return refresh() ? Reload.FETCHED : Reload.HUB_UNREACHABLE;
         } finally {
             refreshing.set(false);
         }
     }
 
-    private void refresh() {
+    /** @return 허브에서 받아 스냅샷을 갱신했으면 true, 못 닿아 유지했으면 false. */
+    private boolean refresh() {
         lastAttemptMs = System.currentTimeMillis();
         try {
             JsonNode list = getJson("/api/docs?type=domain-skill");
@@ -122,9 +124,11 @@ public final class AkgSkillSource implements SkillSource {
                 log.info("akg 스킬 로드: {}개 ({})", next.size(), base);
             }
             hub = next;
+            return true;
         } catch (Exception e) {
             log.warn("akg 허브({}) 접근 실패 — {} 유지: {}", base,
                     hub == null ? "classpath 번들" : "마지막 스냅샷", e.toString());
+            return false;
         }
     }
 

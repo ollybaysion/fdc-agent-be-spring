@@ -6,10 +6,10 @@
 #
 # 실행: ./scripts/reload.sh [BASE_URL]     # 기본 http://localhost:${PORT:-8080}
 #
-# ⚠ reloaded=true 는 "재확인을 시도했다"는 뜻이지 "새로 받아왔다"가 아니다. 허브에
-#   못 닿아도 true 로 나오고 기존 스냅샷이 그대로 유지된다(fail-open — 리로드가
-#   서비스를 죽이지 않는다는 뜻이기도 하다). 실패는 서버 로그의 warn 한 줄에만
-#   남으므로, 반영 여부는 아래 count 나 실제 조회로 교차 확인하는 것이 맞다.
+# 리로드는 fail-open 이라 허브에 못 닿아도 서버는 멀쩡히 옛 스냅샷을 서빙한다 —
+# 그래서 "안 바뀐 것"과 "못 받아온 것"을 응답의 outcome 으로만 가를 수 있다.
+# hub-unreachable 이면 exit 1 로 떨어뜨린다: 배포 스크립트에 물렸을 때 반영이
+# 안 된 채로 조용히 지나가면 안 되니까.
 set -u
 
 BASE=${1:-http://localhost:${PORT:-8080}}
@@ -24,15 +24,22 @@ if [ "$CODE" != "200" ]; then
 	exit 1
 fi
 
-if command -v jq >/dev/null 2>&1; then
-	jq -r 'to_entries[] | "\(.key): source=\(.value.source) reloaded=\(.value.reloaded) count=\(.value.count)"' "$TMP"
-	if jq -e 'any(.[]; .source == "bundle" or .source == "none")' "$TMP" >/dev/null; then
-		echo "(akg 미구성 — AKG_URL 이 없거나 restricted 라 리로드할 원본이 없다)"
-	fi
-	if jq -e 'any(.[]; .source == "akg")' "$TMP" >/dev/null; then
-		echo "(개수가 예상과 다르면 서버 로그에서 'akg 허브' warn 을 확인해라)"
-	fi
-else
+if ! command -v jq >/dev/null 2>&1; then
 	cat "$TMP"
 	echo
+	echo "(jq 가 없어 원문만 보여준다 — outcome 이 fetched 인지 직접 확인해라)"
+	exit 0
+fi
+
+jq -r 'to_entries[] | "\(.key): source=\(.value.source) outcome=\(.value.outcome) count=\(.value.count)"' "$TMP"
+
+if jq -e 'any(.[]; .outcome == "not-configured")' "$TMP" >/dev/null; then
+	echo "(akg 미구성 — AKG_URL 이 없거나 restricted 라 리로드할 원본이 없다)"
+fi
+if jq -e 'any(.[]; .outcome == "already-refreshing")' "$TMP" >/dev/null; then
+	echo "(주기 refresh 가 이미 돌고 있어 건너뛰었다 — 그쪽이 최신을 가져온다)"
+fi
+if jq -e 'any(.[]; .outcome == "hub-unreachable")' "$TMP" >/dev/null; then
+	echo "허브에 닿지 못했다 — 위 count 는 갱신 전 스냅샷이다. 서버 로그의 'akg 허브' warn 을 봐라."
+	exit 1
 fi

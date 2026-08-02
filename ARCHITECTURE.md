@@ -58,6 +58,7 @@ fdc-agent-be-spring/
     │   │              # 툴 구현: SnapshotQueryTool · DataRequestTool · InputRequestTool
     │   │              # SnapshotDb(붙여넣은 표 → 임시 SQLite)
     │   │              # QueryKey·QueryProgress(조달 왕복의 조회 키 = 절차 진행)
+    │   ├── akg/      # AkgSource — 허브 fetch 소스 공통 계약(스킬·라인)·리로드 결과
     │   ├── llm/       # LlmClient seam(LlmTypes 내 인터페이스): MockLlm ↔ OpenAiLlm
     │   ├── skills/    # SkillLoader·SkillRegistry — spec.json → 에이전트 툴 컴파일
     │   │              # QueryPool(요청 가능한 조회 목록) · SqlRender(리터럴 SQL 렌더)
@@ -141,9 +142,12 @@ BE 가 DB 에 닿지 못하는 배포에서는 조회가 왕복이 된다: 요�
 
 - `GET /health`
 - `POST /admin/reload` — akg 소스(스킬·라인) 강제 리로드(`scripts/reload.sh`).
-  운영 표면이라 제품 문법 밖(`/health` 층). akg 미구성이면 `reloaded:false` 로
-  보고만 한다. 응답의 `reloaded` 는 *시도했다*는 뜻 — 허브에 못 닿아도 true 이고
-  기존 스냅샷이 유지된다(fail-open). 실패는 서버 로그 warn 에만 남는다.
+  운영 표면이라 제품 문법 밖(`/health` 층). 섹션마다 `source`·`outcome`·`count`
+  를 돌려준다. 리로드는 fail-open 이라 실패해도 예외 없이 옛 스냅샷을 계속
+  서빙하므로, **`outcome` 이 그 사실을 말해주지 않으면 반영 실패가 성공처럼
+  보인다** — `fetched`(받아왔다) / `hub-unreachable`(못 닿아 유지 중) /
+  `already-refreshing`(주기 refresh 가 이미 진행 중) / `not-configured`
+  (akg 미구성)로 가른다.
 - `POST /api/fdc/v1/chat` — SSE `token* → done | error`. 에이전트 실행은
   스트리밍 전 완료(실패는 정상 HTTP 에러로).
 - `GET /api/fdc/v1/skills` — 사람이 고르는 스킬 카탈로그(로드된 spec 목록).
