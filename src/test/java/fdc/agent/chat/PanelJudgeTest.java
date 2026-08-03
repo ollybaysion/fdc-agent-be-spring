@@ -16,8 +16,8 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
- * panel-judge 판정(#38) — 무상태 순수함수: 선언 ∪ 도착에서 카드·진행·pick·서술
- * 전이가 결정론으로 나온다.
+ * panel-judge 판정(#38) — 무상태 순수함수: 선언 ∪ 도착에서 진행·종결 인지와
+ * 서술 전이가 결정론으로 나온다. 요청 카드는 판정 소관이 아니다(FE 로컬 판정).
  */
 class PanelJudgeTest {
 
@@ -41,27 +41,14 @@ class PanelJudgeTest {
                 null, null);
     }
 
-    /** 선택 인자를 바인드로 쓰는 스킬 — 선언 경로로 완성할 수 없다(T2). */
-    private static SkillSpec optionalBind() {
-        return new SkillSpec("t-opt", null, null, null, null, null,
-                List.of(new SkillSpec.SkillInput("id", true, "조회 키"),
-                        new SkillSpec.SkillInput("opt", false, "선택")),
-                null,
-                List.of(new SkillSpec.SkillStep("1단계", null, null, null,
-                        "SELECT X FROM q WHERE o = :o",
-                        Map.of("o", new SkillSpec.BindSource("arg", "opt", null, null)),
-                        null, null)),
-                null, null);
-    }
-
     private static QueryPool pool() {
-        return QueryPool.of(List.of(twoStep(), optionalBind()));
+        return QueryPool.of(List.of(twoStep()));
     }
 
     private static PanelBody body(
             PanelEvent event, List<SnapshotIndexEntry> index, List<ChatDataSnapshot> snapshots,
-            List<RunDecl> runs, Map<String, Map<String, String>> picks) {
-        return new PanelBody("e1", 1, event, null, index, snapshots, runs, null, null, picks);
+            List<RunDecl> runs) {
+        return new PanelBody("e1", 1, event, null, index, snapshots, runs, null, null);
     }
 
     private static List<RunDecl> declared() {
@@ -74,41 +61,26 @@ class PanelJudgeTest {
     }
 
     @Test
-    void 선언만_있고_스냅샷이_없어도_첫_단계_카드가_나온다() {
+    void 선언만_있어도_절차가_진행으로_보고된다() {
         // T3: run 은 도착에서만 유도되지 않는다 — 선언이 절차의 시작을 연다.
-        Verdict v = PanelJudge.judge(pool(), body(null, null, null, declared(), null));
+        Verdict v = PanelJudge.judge(pool(), body(null, null, null, declared()));
 
-        assertThat(v.openRequests()).hasSize(1);
-        assertThat(v.openRequests().get(0).queryKey()).isEqualTo(KEY0);
-        assertThat(v.openRequests().get(0).sql()).contains("id = 'X-1'").doesNotContain(":id");
-        // 카드의 소속(run) — FE 가 설비→분석 계층에 앉히는 근거. 선언 원문이 그대로 돌아온다.
-        assertThat(v.openRequests().get(0).run()).isEqualTo(declared().get(0));
         assertThat(v.runsProgress()).hasSize(1);
+        assertThat(v.runsProgress().get(0).label()).isEqualTo("t-two-step (id=X-1)");
         assertThat(v.runsProgress().get(0).nextStep()).isEqualTo(0);
         assertThat(v.runsProgress().get(0).terminal()).isFalse();
     }
 
     @Test
-    void 앞_단계가_도착하면_다음_단계_카드가_나온다() {
+    void 단계가_도착하면_진행이_갱신된다() {
         Verdict v = PanelJudge.judge(pool(), body(null, null,
                 List.of(step0("2026-08-01T00:00", List.of(List.of("a1", "b1")))),
-                declared(), null));
+                declared()));
 
-        assertThat(v.openRequests()).hasSize(1);
-        assertThat(v.openRequests().get(0).queryKey()).isEqualTo(KEY1);
-        assertThat(v.openRequests().get(0).sql()).contains("a = 'a1'");
-    }
-
-    @Test
-    void 도착_요약만_있고_rows_가_없으면_needsRows_로_요구한다() {
-        // T16: 도착 여부는 index 가 진실이지만 바인드 값 추출엔 rows 가 필요하다.
-        Verdict v = PanelJudge.judge(pool(), body(null,
-                List.of(new SnapshotIndexEntry(KEY0, "1단계", "2026-08-01T00:00",
-                        List.of("A", "B"), 1, "h1", true)),
-                null, declared(), null));
-
-        assertThat(v.needsRows()).containsExactly(KEY0);
-        assertThat(v.openRequests()).isEmpty();
+        RunProgress run = v.runsProgress().get(0);
+        assertThat(run.arrivedCount()).isEqualTo(1);
+        assertThat(run.nextStep()).isEqualTo(1);
+        assertThat(run.terminal()).isFalse();
     }
 
     @Test
@@ -117,33 +89,37 @@ class PanelJudgeTest {
         Verdict v = PanelJudge.judge(pool(), body(null,
                 List.of(new SnapshotIndexEntry(KEY0, "1단계", "2026-08-01T00:00",
                         List.of("A", "B"), 1, "h1", false)),
-                null, declared(), null));
+                null, declared()));
 
-        assertThat(v.needsRows()).isEmpty();
-        assertThat(v.openRequests()).hasSize(1); // 1단계가 도착하지 않은 것으로 판정 — 첫 카드.
-        assertThat(v.openRequests().get(0).queryKey()).isEqualTo(KEY0);
+        RunProgress run = v.runsProgress().get(0);
+        assertThat(run.arrivedCount()).isZero(); // 1단계가 도착하지 않은 것으로 판정.
+        assertThat(run.nextStep()).isZero();
     }
 
     @Test
     void 같은_키_다중_도착은_capturedAt_최신_한_건만_본다() {
-        // T9: 배열 순서 last-wins 가 아니라 시각 규칙 — 순수함수가 입력 순서에 흔들리지 않는다.
-        Verdict v = PanelJudge.judge(pool(), body(null, null,
-                List.of(step0("2026-08-01T02:00", List.of(List.of("a2", "b2"))),
-                        step0("2026-08-01T01:00", List.of(List.of("a1", "b1")))),
-                declared(), null));
+        // T9: 배열 순서 last-wins 가 아니라 시각 규칙 — 서술에 실리는 행도 최신 것이다.
+        List<ChatDataSnapshot> arrived = List.of(
+                step0("2026-08-01T02:00", List.of(List.of("a2", "b2"))),
+                step0("2026-08-01T01:00", List.of(List.of("a1", "b1"))),
+                new ChatDataSnapshot(KEY1, "2단계", "2026-08-01T03:00", List.of("C"), 1,
+                        List.of(List.of("c1"))));
 
-        assertThat(v.openRequests()).hasSize(1);
-        assertThat(v.openRequests().get(0).sql()).contains("a = 'a2'");
+        Verdict v = PanelJudge.judge(pool(), body(
+                new PanelEvent("snapshot-registered", KEY1), null, arrived, declared()));
+
+        assertThat(v.narration()).isNotNull();
+        assertThat(v.narration().steps().get(0).full().rows().get(0))
+                .containsExactly("a2", "b2");
     }
 
     @Test
-    void 영행_확인이면_종결이고_하위_카드가_없다() {
+    void 영행_확인이면_종결이다() {
         // T5: 0행도 도착이고 종결이다 — 없다는 사실로 절차가 끝난다.
         Verdict v = PanelJudge.judge(pool(), body(null, null,
                 List.of(step0("2026-08-01T00:00", List.of())),
-                declared(), null));
+                declared()));
 
-        assertThat(v.openRequests()).isEmpty();
         RunProgress run = v.runsProgress().get(0);
         assertThat(run.terminal()).isTrue();
         assertThat(run.emptyAtStep()).isEqualTo(0);
@@ -151,56 +127,22 @@ class PanelJudgeTest {
     }
 
     @Test
-    void 미선언_절차는_진행만_보고하고_카드는_만들지_않는다() {
-        // T1: queryKey 는 손실 인코딩 — 키에서 복원한 args 로 SQL 을 만들지 않는다.
+    void 미선언_절차도_도착_키에서_유도돼_진행이_보고된다() {
+        // 키 파싱으로 복원한 args 는 라벨·서술 문장에만 쓰인다 — SQL 은 만들지 않는다.
         Verdict v = PanelJudge.judge(pool(), body(null, null,
                 List.of(step0("2026-08-01T00:00", List.of(List.of("a1", "b1")))),
-                null, null));
+                null));
 
-        assertThat(v.openRequests()).isEmpty();
         RunProgress run = v.runsProgress().get(0);
-        assertThat(run.holds()).isNotNull();
-        assertThat(run.holds().get(0).reason()).contains("runs[]");
-    }
-
-    @Test
-    void 여러_값이면_pick_후보를_선언하고_pick_이_오면_카드가_나온다() {
-        // T8: 갈림길은 사람이 고른다 — 후보 밖 값은 받지 않는다.
-        List<ChatDataSnapshot> arrived = List.of(step0("2026-08-01T00:00",
-                List.of(List.of("a1", "b1"), List.of("a2", "b2"))));
-
-        Verdict withoutPick = PanelJudge.judge(pool(), body(null, null, arrived, declared(), null));
-        assertThat(withoutPick.openRequests()).isEmpty();
-        RunProgress run = withoutPick.runsProgress().get(0);
-        assertThat(run.needsPick()).hasSize(1);
-        assertThat(run.needsPick().get(0).queryId()).isEqualTo("t-two-step#1");
-        assertThat(run.needsPick().get(0).column()).isEqualTo("A");
-        assertThat(run.needsPick().get(0).candidates()).containsExactly("a1", "a2");
-
-        Verdict withPick = PanelJudge.judge(pool(), body(null, null, arrived, declared(),
-                Map.of("t-two-step#1", Map.of("A", "a2"))));
-        assertThat(withPick.openRequests()).hasSize(1);
-        assertThat(withPick.openRequests().get(0).sql()).contains("a = 'a2'");
-    }
-
-    @Test
-    void 선택_인자_바인드_스텝은_카드_대신_사유를_보고한다() {
-        // T2: 선언 경로에서 영구 미완성일 스텝 — 조용한 멈춤 대신 보류 보고.
-        Verdict v = PanelJudge.judge(pool(), body(null, null, null,
-                List.of(new RunDecl("t-opt", Map.of("id", "1"))), null));
-
-        assertThat(v.openRequests()).isEmpty();
-        RunProgress run = v.runsProgress().get(0);
-        assertThat(run.holds()).isNotNull();
-        assertThat(run.holds().get(0).reason()).contains("선택 인자");
+        assertThat(run.label()).isEqualTo("t-two-step (id=X-1)");
+        assertThat(run.arrivedCount()).isEqualTo(1);
     }
 
     @Test
     void 등재되지_않은_스킬_선언은_사유를_보고한다() {
         Verdict v = PanelJudge.judge(pool(), body(null, null, null,
-                List.of(new RunDecl("no-such-skill", Map.of())), null));
+                List.of(new RunDecl("no-such-skill", Map.of()))));
 
-        assertThat(v.openRequests()).isEmpty();
         assertThat(v.runsProgress().get(0).holds().get(0).reason()).contains("등재되지 않은");
     }
 
@@ -210,7 +152,7 @@ class PanelJudgeTest {
         Verdict v = PanelJudge.judge(pool(), body(
                 new PanelEvent("snapshot-registered", KEY0), null,
                 List.of(step0("2026-08-01T00:00", List.of())),
-                declared(), null));
+                declared()));
 
         assertThat(v.narration()).isNotNull();
         assertThat(v.narration().runLabel()).isEqualTo("t-two-step (id=X-1)");
@@ -230,23 +172,23 @@ class PanelJudgeTest {
                 new ChatDataSnapshot(KEY1, "2단계", "2026-08-01T00:10", List.of("C"), 0, List.of()));
 
         Verdict onStep0 = PanelJudge.judge(pool(), body(
-                new PanelEvent("snapshot-updated", KEY0), null, arrived, declared(), null));
+                new PanelEvent("snapshot-updated", KEY0), null, arrived, declared()));
         assertThat(onStep0.narration()).isNull();
 
         Verdict onStep1 = PanelJudge.judge(pool(), body(
-                new PanelEvent("snapshot-registered", KEY1), null, arrived, declared(), null));
+                new PanelEvent("snapshot-registered", KEY1), null, arrived, declared()));
         assertThat(onStep1.narration()).isNotNull();
     }
 
     @Test
     void 도착이_아닌_이벤트나_풀_밖_키는_서술_대상이_아니다() {
         Verdict noEvent = PanelJudge.judge(pool(), body(null, null,
-                List.of(step0("2026-08-01T00:00", List.of())), declared(), null));
+                List.of(step0("2026-08-01T00:00", List.of())), declared()));
         assertThat(noEvent.narration()).isNull();
 
         Verdict strangeKey = PanelJudge.judge(pool(), body(
                 new PanelEvent("snapshot-registered", "자유-저작-키"), null,
-                List.of(step0("2026-08-01T00:00", List.of())), declared(), null));
+                List.of(step0("2026-08-01T00:00", List.of())), declared()));
         assertThat(strangeKey.narration()).isNull();
     }
 }

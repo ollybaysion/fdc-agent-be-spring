@@ -5,8 +5,8 @@ import java.util.List;
 /**
  * 데이터 패널 스냅샷 한 건의 <b>rows 없는 요약</b> — panel-judge 판정의 집합
  * 원소다(#38 T16). 패널 클릭 한 번에 rows 전문을 다시 싣지 않기 위한 경량
- * 계약으로, 판정에 rows 가 실제로 필요한 스냅샷만 {@code snapshots} 로
- * 따라온다(부족하면 응답의 {@code needsRows} 가 재호출을 요구한다).
+ * 계약으로, rows 가 실제로 쓰이는 스냅샷(종결 서술의 전량 동봉)만
+ * {@code snapshots} 로 따라온다.
  *
  * <p>{@code rowCount} 의 세 상태는 {@link ChatDataSnapshot} 과 같다 —
  * null=아직 결과 안 옴(카탈로그), 0=<b>0행으로 확인됨</b>(없다는 사실),

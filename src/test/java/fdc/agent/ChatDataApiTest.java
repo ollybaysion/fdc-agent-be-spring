@@ -34,7 +34,7 @@ class ChatDataApiTest {
     }
 
     @Test
-    void 선언된_절차의_첫_카드가_done_만으로_나온다() throws Exception {
+    void 선언된_절차의_진행이_done_만으로_나온다() throws Exception {
         MockHttpServletResponse res = chatData("""
                 {"eventId":"e1","revision":3,
                  "runs":[{"skill":"fdc-explain-sensor","args":{"snsr_id":"S-0004"}}]}
@@ -42,24 +42,19 @@ class ChatDataApiTest {
         assertThat(res.getStatus()).isEqualTo(200);
         String body = res.getContentAsString(StandardCharsets.UTF_8);
 
-        // 서술이 없으니 token 이벤트는 없다 — done 만.
+        // 서술이 없으니 token 이벤트는 없다 — done 만. 카드는 응답에 없다(FE 로컬 판정).
         assertThat(SseTestSupport.tokenText(body)).isEmpty();
         JsonNode done = SseTestSupport.donePayload(body);
         assertThat(done).isNotNull();
         assertThat(done.path("eventId").asText()).isEqualTo("e1");
         assertThat(done.path("revision").asInt()).isEqualTo(3);
         assertThat(done.path("poolRev").asText()).isNotEmpty();
-
-        JsonNode card = done.path("openRequests").get(0);
-        assertThat(card.path("queryKey").asText()).isEqualTo(KEY0);
-        assertThat(card.path("sql").asText()).contains("snsr_id = 'S-0004'").doesNotContain(":id");
+        assertThat(done.has("openRequests")).isFalse();
         assertThat(done.path("runsProgress").get(0).path("nextStep").asInt()).isZero();
     }
 
     @Test
-    void 앞_단계가_도착하면_준비된_스텝_전부가_카드로_나온다() throws Exception {
-        // fdc-explain-sensor 의 2·3단계는 둘 다 1단계 결과(EQP_ID)에만 의존한다 —
-        // 채팅 릴레이는 "다음 하나"만 광고했지만 판정은 준비된 걸음 전부를 연다.
+    void 단계가_도착하면_진행이_갱신된다() throws Exception {
         MockHttpServletResponse res = chatData("""
                 {"eventId":"e2","revision":4,
                  "runs":[{"skill":"fdc-explain-sensor","args":{"snsr_id":"S-0004"}}],
@@ -70,12 +65,10 @@ class ChatDataApiTest {
                 """.formatted(KEY0));
         JsonNode done = SseTestSupport.donePayload(res.getContentAsString(StandardCharsets.UTF_8));
 
-        assertThat(done.path("openRequests")).hasSize(2);
-        assertThat(done.path("openRequests").get(0).path("queryKey").asText())
-                .isEqualTo("fdc-explain-sensor#1__snsr_id=S-0004");
-        assertThat(done.path("openRequests").get(0).path("sql").asText()).contains("'CVD-01'");
-        assertThat(done.path("openRequests").get(1).path("queryKey").asText())
-                .isEqualTo("fdc-explain-sensor#2__snsr_id=S-0004");
+        JsonNode run = done.path("runsProgress").get(0);
+        assertThat(run.path("arrivedCount").asInt()).isEqualTo(1);
+        assertThat(run.path("nextStep").asInt()).isEqualTo(1);
+        assertThat(run.path("terminal").asBoolean()).isFalse();
     }
 
     @Test
@@ -98,7 +91,6 @@ class ChatDataApiTest {
         assertThat(done.path("narratedRun").asText()).isEqualTo("fdc-explain-sensor (snsr_id=S-0004)");
         assertThat(done.path("terminalRuns").get(0).asText())
                 .isEqualTo("fdc-explain-sensor (snsr_id=S-0004)");
-        assertThat(done.path("openRequests")).isEmpty();
     }
 
     @Test
@@ -111,7 +103,7 @@ class ChatDataApiTest {
                 """);
         assertThat(res.getStatus()).isEqualTo(200);
         assertThat(SseTestSupport.donePayload(res.getContentAsString(StandardCharsets.UTF_8))
-                .path("openRequests")).hasSize(1);
+                .path("runsProgress")).hasSize(1);
     }
 
     @Test
