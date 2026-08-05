@@ -32,8 +32,12 @@ public record RunProgress(
     /**
      * 알아야 할 것 하나의 상태. {@code state} 는 {@code INACTIVE · PENDING_GATE ·
      * UNFILLED · FILLED · UNPROCURABLE}.
+     *
+     * @param source 지목한 조달이 아닌 <b>다른 경로</b>로 채워졌으면 그 스냅샷의 키.
+     *     시킨 조회로 채워졌으면 null — 채움 폭포의 1차와 2차 이상을 가르는 자리다.
      */
-    public record Need(String id, String what, String state) {
+    public record Need(String id, String what, String state,
+            @JsonInclude(JsonInclude.Include.NON_NULL) String source) {
     }
 
     /** 판정하지 못한 절차와 그 사유 — 무음 대신 보고. */

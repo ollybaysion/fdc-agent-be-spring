@@ -270,6 +270,31 @@ class NarrationPromptTest {
     }
 
     @Test
+    void 재생_밖에서_온_사실은_값까지_적는다() {
+        // 채움 폭포의 2·3차로 찬 need 는 tool 결과 어디에도 없다. 이름만 "확보"라고
+        // 적으면 모델은 못 본 값을 서술해야 하고, 그 자리가 지어내기가 나는 자리다.
+        SkillSpec s = withNeeds(List.of(
+                new SkillSpec.SkillNeed("measure_kind", "센서 정체·상태", null,
+                        List.of(new SkillSpec.Fill("sensor_row", "SNSR_TYPE_CD"))),
+                new SkillSpec.SkillNeed("outside", "밖에서 받은 사실", null, List.of())));
+        NeedsResolver.Resolution resolution = NeedsResolver.resolve(s.needs(),
+                (queryId, column) -> "sensor_row".equals(queryId)
+                        ? NeedsResolver.Cell.of(List.of("TEMP")) : null,
+                NeedsResolver.ANY,
+                Map.of("outside", "사내리포트에서 읽은 값"));
+        Narration n = new Narration("fdc-explain-sensor (snsr_id=412086)", "fdc-explain-sensor",
+                Map.of("snsr_id", "412086"),
+                List.of(arrival(queries().get(0), List.of(List.of("412086")), SENSOR_COLUMNS)),
+                resolution);
+
+        String verdict = NarrationPrompt.verdictTurn(s, n);
+        // 재생된 조달로 찬 것은 이름만 — 값은 tool 결과에 이미 있다.
+        assertThat(verdict).contains("센서 정체·상태 /");
+        assertThat(verdict).doesNotContain("센서 정체·상태 = ");
+        assertThat(verdict).contains("밖에서 받은 사실 = 사내리포트에서 읽은 값");
+    }
+
+    @Test
     void 서술_규칙은_지어내지_말_것과_하지_말_것뿐이다() {
         String rules = NarrationPrompt.narrationRules(spec());
 

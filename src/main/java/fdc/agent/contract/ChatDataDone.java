@@ -6,8 +6,11 @@ import java.util.List;
 /**
  * {@code POST /api/fdc/v1/chat/data} SSE {@code done} 페이로드 — 선언적 판정
  * 결과(#38). 서술이 있으면 그 앞에 token 스트림이 흐르고, 아니면 done 만 온다.
- * 요청 카드는 여기 없다 — 카드 배치·SQL 완성은 FE 가 카탈로그(binds 포함)로
- * 로컬 판정한다(demo-fe dataList). 이 페이로드는 BE 인지의 선언이다.
+ *
+ * <p>{@code dataRequests} 는 <b>조달 원장</b>이다 — 판정에 든 절차들의 조달 전량이
+ * 상태({@link RequestState})를 달고 매번 전부 실린다. FE 는 이것을 replace 하고
+ * 상태대로 그린다: 무엇을 보일지·감출지 판단하지 않는다. 스킬을 읽고 카드를
+ * 배치하는 일은 BE 소관이고 화면은 송출이다.
  *
  * <p>{@code eventId}/{@code revision} 은 요청 echo — 재시도·토글 왕복에서 FE 가
  * 낡은 응답을 버리는 근거다(T7). {@code poolRev} 는 스킬 풀 지문 — 풀이 시변이라
@@ -19,6 +22,7 @@ public record ChatDataDone(
         @JsonInclude(JsonInclude.Include.NON_NULL) String eventId,
         @JsonInclude(JsonInclude.Include.NON_NULL) Integer revision,
         String poolRev,
+        List<DataRequest> dataRequests,
         List<RunProgress> runsProgress,
         @JsonInclude(JsonInclude.Include.NON_NULL) List<String> terminalRuns,
         @JsonInclude(JsonInclude.Include.NON_NULL) String narratedRun) {

@@ -2,24 +2,30 @@ package fdc.agent.chat;
 
 import fdc.agent.chat.ChatAgent.HistoryMessage;
 import fdc.agent.contract.ChatDataSnapshot;
+import fdc.agent.contract.DataRequest;
 import fdc.agent.contract.PanelEvent;
 import fdc.agent.contract.QueryScope;
+import fdc.agent.contract.RequestState;
 import fdc.agent.contract.RunDecl;
 import fdc.agent.contract.RunProgress;
 import fdc.agent.contract.SnapshotIndexEntry;
 import fdc.agent.skills.NeedsResolver;
 import fdc.agent.skills.QueryPool;
+import fdc.agent.skills.SkillSpec;
+import fdc.agent.skills.SqlRender;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * panel-judge — 데이터 패널 상태의 <b>결정론 판정</b> (#38, {@code POST /chat/data} 의
- * 심장). 패널의 모든 수정·입력이 이 판정을 부르고, BE 는 절차의 진행·종결을
- * 인지한다. <b>요청 카드는 여기서 만들지 않는다</b> — 카드 배치·SQL 완성은 FE 가
- * 카탈로그(binds 포함)로 로컬 판정한다(demo-fe dataList, #169). 이 왕복의 용도는
- * BE 인지와 종결 서술 전이다.
+ * 심장). 패널의 모든 수정·입력이 이 판정을 부르고, BE 는 절차의 진행·종결을 인지하고
+ * <b>조달 원장</b>을 만든다 — 이 절차가 무엇을 조회해야 하고 각각이 지금 어떤 상태인지의
+ * 전량. FE 는 그것을 replace 해서 그리기만 한다: 스킬을 읽고 카드를 배치하는 판단은
+ * 화면 쪽에 있으면 안 된다.
  *
  * <p>판정의 기준이 spec v3 에서 바뀌었다: <b>"조회가 다 왔나"에서 "알아야 할 걸 다
  * 알았나"로</b>. 전자는 도착한 행 수로 답할 수 있어서 v2 가 그렇게 했지만, 그건
@@ -75,14 +81,31 @@ public final class PanelJudge {
             QueryPool.Query query, SnapshotIndexEntry hit, ChatDataSnapshot full) {
     }
 
-    /** 판정 결과 — 응답 페이로드의 재료 전부. */
+    /**
+     * 판정 결과 — 응답 페이로드의 재료 전부.
+     *
+     * @param ledger 조달 원장 — 판정에 든 절차들의 조달 <b>전량</b>이 상태를 달고 실린다.
+     *     새로 생긴 것만 흘리는 이벤트가 아니라 매번 전부인 상태이므로, FE 는 replace
+     *     하면 되고 멱등성은 규칙이 아니라 구조다.
+     */
     public record Verdict(
             List<RunProgress> runsProgress,
             List<String> terminalRuns,
+            List<DataRequest> ledger,
             Narration narration) {
     }
 
     public static Verdict judge(QueryPool pool, PanelBody body) {
+        return judge(pool, body, Map.of());
+    }
+
+    /**
+     * @param altFills 결정론 밖에서 채워진 사실 — {@link AltFillJudge} 가 다른 표에서
+     *     읽어 낸 것들, run 키({@link #runKey})로 묶여 있다. 비어 있으면 순수 결정론
+     *     판정이고, 실려 있어도 {@code when} 갈래와 종결 규칙은 그대로다.
+     */
+    public static Verdict judge(
+            QueryPool pool, PanelBody body, Map<String, List<AltFillJudge.AltFill>> altFills) {
         Map<String, SnapshotIndexEntry> index = effectiveIndex(body);
         Map<String, ChatDataSnapshot> rows = rowsByKey(body, index);
 
@@ -90,16 +113,25 @@ public final class PanelJudge {
 
         List<RunProgress> runsProgress = new ArrayList<>();
         List<String> terminalRuns = new ArrayList<>();
+        List<DataRequest> ledger = new ArrayList<>();
         for (RunSlot slot : slots) {
-            RunProgress progress = judgeRun(pool, slot, index, rows);
+            List<AltFillJudge.AltFill> alt = altFills.getOrDefault(
+                    runKey(slot.skill(), slot.args(), pool), List.of());
+            RunProgress progress = judgeRun(pool, slot, index, rows, alt, ledger);
             runsProgress.add(progress);
             if (progress.terminal()) {
                 terminalRuns.add(progress.label());
             }
         }
 
-        Narration narration = narrationOf(pool, body, index, rows, slots);
-        return new Verdict(List.copyOf(runsProgress), List.copyOf(terminalRuns), narration);
+        Narration narration = narrationOf(pool, body, index, rows, slots, altFills);
+        return new Verdict(List.copyOf(runsProgress), List.copyOf(terminalRuns),
+                List.copyOf(ledger), narration);
+    }
+
+    /** 절차 하나를 가리키는 안정 키 — 스킬과 run 이름표. 판정 밖에서 run 을 지목할 때 쓴다. */
+    public static String runKey(String skill, Map<String, String> args, QueryPool pool) {
+        return skill + " " + QueryKey.argsPart(args, pool.requiredArgsOf(skill));
     }
 
     // ── 판정 집합 ────────────────────────────────────────────────────────────
@@ -174,10 +206,15 @@ public final class PanelJudge {
 
     /**
      * 절차 하나 — 선언({@code runs[]})의 args 는 원문, 도착 키에서만 유도된 run 의
-     * args 는 키 파싱 복원이다. 어느 쪽이든 판정은 SQL 을 만들지 않으므로(카드는
-     * FE 로컬 판정) 복원 args 는 라벨·서술 문장에만 쓰인다.
+     * args 는 키 파싱 복원이다.
+     *
+     * <p>{@code declared} 가 그 둘을 가른다. 키는 <b>손실 인코딩</b>이라({@code # & =}
+     * 를 {@code _} 로 접는다) 복원한 args 로 SQL 을 만들면 사람이 사내에서 실행할
+     * 문장에 원문과 다른 값이 박힐 수 있다. 미선언 run 도 진행은 보고하되 원장 줄은
+     * {@link RequestState#READY} 로 올라가지 않는다.
      */
-    private record RunSlot(String skill, String argsPart, Map<String, String> args) {
+    private record RunSlot(
+            String skill, String argsPart, Map<String, String> args, boolean declared) {
     }
 
     private static List<RunSlot> assembleRuns(
@@ -193,11 +230,12 @@ public final class PanelJudge {
             if (!pool.knows(skill)) {
                 // 등재되지 않은 스킬 — 무음으로 버리지 않고 보고 대상으로 남긴다.
                 slots.putIfAbsent("?" + skill,
-                        new RunSlot(skill, QueryKey.argsPart(args, List.copyOf(args.keySet())), args));
+                        new RunSlot(skill, QueryKey.argsPart(args, List.copyOf(args.keySet())),
+                                args, true));
                 continue;
             }
             String argsPart = QueryKey.argsPart(args, pool.requiredArgsOf(skill));
-            slots.putIfAbsent(skill + " " + argsPart, new RunSlot(skill, argsPart, args));
+            slots.putIfAbsent(skill + " " + argsPart, new RunSlot(skill, argsPart, args, true));
         }
 
         for (String key : index.keySet()) {
@@ -208,7 +246,7 @@ public final class PanelJudge {
             }
             slots.putIfAbsent(query.skill() + " " + parsed.argsPart(),
                     new RunSlot(query.skill(), parsed.argsPart(),
-                            QueryKey.parseArgs(parsed.argsPart())));
+                            QueryKey.parseArgs(parsed.argsPart()), false));
         }
         return List.copyOf(slots.values());
     }
@@ -217,7 +255,8 @@ public final class PanelJudge {
 
     private static RunProgress judgeRun(
             QueryPool pool, RunSlot slot,
-            Map<String, SnapshotIndexEntry> index, Map<String, ChatDataSnapshot> rows) {
+            Map<String, SnapshotIndexEntry> index, Map<String, ChatDataSnapshot> rows,
+            List<AltFillJudge.AltFill> altFills, List<DataRequest> ledger) {
         String label = label(slot);
         if (!pool.knows(slot.skill())) {
             return new RunProgress(slot.skill(), slot.args(), label, 0, 0, List.of(), false,
@@ -225,12 +264,11 @@ public final class PanelJudge {
                     List.of(new RunProgress.StepHold(slot.skill(), "등재되지 않은 스킬입니다.")));
         }
 
-        NeedsResolver.Resolution resolution =
-                resolve(pool, slot, index, rows, null);
+        ArrivalLens lens = lensOf(slot, index, rows, null);
+        NeedsResolver.Resolution resolution = resolve(pool, slot, lens, altFills);
 
-        List<RunProgress.Need> needs = resolution.needs().stream()
-                .map(n -> new RunProgress.Need(n.id(), n.what(), n.state().name()))
-                .toList();
+        List<RunProgress.Need> needs =
+                needsOf(resolution, pool.needsOf(slot.skill()), lens, altFills);
         int active = (int) resolution.needs().stream()
                 .filter(NeedsResolver.NeedStatus::active).count();
         int met = resolution.in(NeedsResolver.State.FILLED).size();
@@ -238,61 +276,186 @@ public final class PanelJudge {
                 .map(id -> slot.skill() + "#" + id)
                 .toList();
 
+        ledger.addAll(ledgerOf(pool, slot, index, rows, lens, resolution));
+
         return new RunProgress(slot.skill(), slot.args(), label, active, met, wanted,
                 resolution.terminal(), resolution.outcome().name(), needs, null);
+    }
+
+    // ── 조달 원장 ────────────────────────────────────────────────────────────
+
+    /**
+     * 이 절차의 조달 <b>전량</b>을 상태와 함께 원장 줄로. 도착한 것도, 지금 열 수
+     * 있는 것도, 앞 조달을 기다리는 것도, 영영 못 도는 것도 모두 실린다 — 무엇을
+     * 화면에 보일지는 FE 가 판단하지 않고 이 상태를 그대로 그린다.
+     *
+     * <p>상태의 근거는 {@link NeedsResolver.Resolution} 하나다. {@code wanted} 는
+     * "활성·미충족 need 가 지목했고 아직 안 왔으며 앞으로라도 돌 수 있는 조달"이므로
+     * 그 목록이 곧 <b>열어야 할 것</b>이고, 그 안에서 바인드가 실제로 풀리는지만
+     * {@link BindResolver} 에 묻는다. 목록 밖은 도착했거나, 이 질문에서 안 부르거나,
+     * 영영 못 도는 것이다.
+     */
+    private static List<DataRequest> ledgerOf(
+            QueryPool pool, RunSlot slot,
+            Map<String, SnapshotIndexEntry> index, Map<String, ChatDataSnapshot> rows,
+            ArrivalLens lens, NeedsResolver.Resolution resolution) {
+        NeedsResolver.Reach reach = NeedsResolver.reachOf(pool.wiringOf(slot.skill()), lens);
+        Set<String> wanted = new LinkedHashSet<>(resolution.wanted());
+        Map<String, List<String>> needsByQuery = needsByQuery(pool.needsOf(slot.skill()));
+        Set<String> pendingGate = new LinkedHashSet<>();
+        for (NeedsResolver.NeedStatus n : resolution.in(NeedsResolver.State.PENDING_GATE)) {
+            pendingGate.add(n.id());
+        }
+
+        List<DataRequest> out = new ArrayList<>();
+        for (QueryPool.Query query : pool.queriesOf(slot.skill())) {
+            String key = keyOf(slot, query.queryId());
+            List<String> served = needsByQuery.getOrDefault(query.id(), List.of());
+            SnapshotIndexEntry hit = index.get(key);
+            if (hit != null && hit.arrived()) {
+                out.add(entry(key, query, slot, RequestState.ARRIVED, null, null, served));
+                continue;
+            }
+            if (wanted.contains(query.id())) {
+                out.add(open(key, query, slot, rows, served));
+                continue;
+            }
+            if (!reach.canRun(query.id())) {
+                out.add(entry(key, query, slot, RequestState.UNREACHABLE,
+                        "앞 조달이 빈손으로 확인돼 이 조회는 돌 수 없습니다.", null, served));
+                continue;
+            }
+            boolean gated = served.stream().anyMatch(pendingGate::contains);
+            out.add(gated
+                    ? entry(key, query, slot, RequestState.BLOCKED,
+                            "이 조회가 필요한지는 앞 조달 결과가 정해집니다.", null, served)
+                    : entry(key, query, slot, RequestState.INACTIVE, null, null, served));
+        }
+        return out;
+    }
+
+    /** 열어야 할 조달 하나 — 바인드가 실제로 풀리면 SQL 까지, 아니면 사유만. */
+    private static DataRequest open(
+            String key, QueryPool.Query query, RunSlot slot,
+            Map<String, ChatDataSnapshot> rows, List<String> served) {
+        if (!slot.declared() && !slot.argsPart().isEmpty()) {
+            // T1: 키에서 복원한 args 로는 실행할 문장을 만들지 않는다.
+            return entry(key, query, slot, RequestState.BLOCKED,
+                    "선언되지 않은 절차입니다 — runs[] 로 인자 원문을 선언해 주세요.", null, served);
+        }
+        BindOutcome outcome = BindResolver.resolve(query, slot.args(), null, rows::get);
+        return switch (outcome) {
+            case BindOutcome.Ready ready -> ready(key, query, slot, ready, served);
+            case BindOutcome.MissingUpstream missing -> entry(key, query, slot,
+                    RequestState.BLOCKED, missing.query() + " 결과가 먼저 필요합니다.", null, served);
+            case BindOutcome.EmptyUpstream empty -> entry(key, query, slot,
+                    RequestState.UNREACHABLE,
+                    empty.query() + " 결과가 0행이라 이어갈 수 없습니다.", null, served);
+            case BindOutcome.NeedPick pick -> entry(key, query, slot, RequestState.BLOCKED,
+                    pick.query() + " 결과의 " + pick.column() + " 이 여러 값입니다 — "
+                            + BindResolver.candidates(pick.candidates()), null, served);
+            case BindOutcome.Blocked blocked -> entry(key, query, slot,
+                    RequestState.BLOCKED, blocked.reason(), null, served);
+        };
+    }
+
+    private static DataRequest ready(
+            String key, QueryPool.Query query, RunSlot slot,
+            BindOutcome.Ready ready, List<String> served) {
+        try {
+            return entry(key, query, slot, RequestState.READY, null,
+                    SqlRender.render(query.sql(), ready.binds()), served);
+        } catch (IllegalArgumentException bad) {
+            return entry(key, query, slot, RequestState.BLOCKED,
+                    "조회 문장을 완성하지 못했습니다: " + bad.getMessage(), null, served);
+        }
+    }
+
+    private static DataRequest entry(
+            String key, QueryPool.Query query, RunSlot slot,
+            RequestState state, String blocked, String sql, List<String> served) {
+        return new DataRequest(key, query.label(), sql,
+                sql != null ? SqlRender.columnsOf(query.sql()) : null,
+                new RunDecl(slot.skill(), slot.args()), state, blocked, served);
+    }
+
+    /**
+     * need 상태 보고 — 채워진 need 가 <b>우리가 시킨 조회로</b> 채워졌는지 다른 경로로
+     * 왔는지를 함께 적는다. 화면과 서술이 그 둘을 구분해야 "요청한 것과 다르게 주셨는데
+     * 그걸로 답했다"를 말할 수 있고, 값을 그대로 다음 조회에 박는 이상 어디서 온
+     * 값인지가 추적 가능해야 한다.
+     */
+    private static List<RunProgress.Need> needsOf(
+            NeedsResolver.Resolution resolution, List<SkillSpec.SkillNeed> spec,
+            ArrivalLens lens, List<AltFillJudge.AltFill> altFills) {
+        Map<String, String> alternates = lens.alternates();
+        Map<String, String> judged = new LinkedHashMap<>();
+        for (AltFillJudge.AltFill fill : altFills) {
+            judged.put(fill.need(), fill.source());
+        }
+        Map<String, List<SkillSpec.Fill>> fillsById = new LinkedHashMap<>();
+        for (SkillSpec.SkillNeed need : spec) {
+            if (need != null && need.id() != null) {
+                fillsById.put(need.id(), need.fills());
+            }
+        }
+        List<RunProgress.Need> out = new ArrayList<>();
+        for (NeedsResolver.NeedStatus n : resolution.needs()) {
+            String source = judged.get(n.id());
+            for (SkillSpec.Fill fill : fillsById.getOrDefault(n.id(), List.of())) {
+                if (source != null || fill == null) {
+                    break;
+                }
+                source = alternates.get(fill.query() + "." + fill.column());
+            }
+            out.add(new RunProgress.Need(n.id(), n.what(), n.state().name(), source));
+        }
+        return out;
+    }
+
+    /** 조달 id → 그것을 지목한 need id 들. 아무도 안 부르는 조달은 빈 목록(죽은 조달). */
+    private static Map<String, List<String>> needsByQuery(List<SkillSpec.SkillNeed> needs) {
+        Map<String, List<String>> out = new LinkedHashMap<>();
+        for (SkillSpec.SkillNeed need : needs) {
+            if (need == null || need.id() == null) {
+                continue;
+            }
+            for (SkillSpec.Fill fill : need.fills()) {
+                if (fill != null && fill.query() != null) {
+                    out.computeIfAbsent(fill.query(), k -> new ArrayList<>()).add(need.id());
+                }
+            }
+        }
+        return out;
     }
 
     /** 이 run 의 판정 한 벌 — 도착 창구와 도달 가능성을 같은 {@code without} 으로 묶는다. */
     private static NeedsResolver.Resolution resolve(
             QueryPool pool, RunSlot slot, Map<String, SnapshotIndexEntry> index,
-            Map<String, ChatDataSnapshot> rows, String without) {
-        NeedsResolver.Rows arrived = rowsOf(slot, index, rows, without);
-        return NeedsResolver.resolve(pool.needsOf(slot.skill()), arrived,
-                NeedsResolver.reachOf(pool.wiringOf(slot.skill()), arrived));
+            Map<String, ChatDataSnapshot> rows, String without,
+            List<AltFillJudge.AltFill> altFills) {
+        return resolve(pool, slot, lensOf(slot, index, rows, without), altFills);
     }
 
-    /**
-     * 판정기가 도착 데이터를 읽는 창구.
-     *
-     * <p>행 실물이 실려 있으면 그걸로 읽고, 요약만 있으면 <b>"찼지만 값은 모른다"</b>
-     * ({@link NeedsResolver.Cell#OPAQUE})로 준다 — 경량 판정(T16)에서도 채워짐은
-     * 판정되지만 갈래({@code when})는 못 연다. 요약조차 컬럼을 안 실었으면 행이 온
-     * 사실만 믿는다: 컬럼 목록이 없다는 것은 "그 컬럼이 없다"가 아니다.
-     *
-     * @param without 이 키를 미도착으로 치고 본다(서술 전이의 인과 판정). null 이면 전부 본다.
-     */
-    private static NeedsResolver.Rows rowsOf(
+    private static NeedsResolver.Resolution resolve(
+            QueryPool pool, RunSlot slot, ArrivalLens lens,
+            List<AltFillJudge.AltFill> altFills) {
+        return NeedsResolver.resolve(pool.needsOf(slot.skill()), lens,
+                NeedsResolver.reachOf(pool.wiringOf(slot.skill()), lens), valuesOf(altFills));
+    }
+
+    private static Map<String, String> valuesOf(List<AltFillJudge.AltFill> altFills) {
+        Map<String, String> out = new LinkedHashMap<>();
+        for (AltFillJudge.AltFill fill : altFills) {
+            out.put(fill.need(), fill.value());
+        }
+        return out;
+    }
+
+    private static ArrivalLens lensOf(
             RunSlot slot, Map<String, SnapshotIndexEntry> index,
             Map<String, ChatDataSnapshot> rows, String without) {
-        return (queryId, column) -> {
-            String key = keyOf(slot, slot.skill() + "#" + queryId);
-            if (key.equals(without)) {
-                return null;
-            }
-            SnapshotIndexEntry hit = index.get(key);
-            if (hit == null || !hit.arrived()) {
-                return null;
-            }
-            if (hit.isEmptyResult()) {
-                return NeedsResolver.Cell.EMPTY;
-            }
-            ChatDataSnapshot full = rows.get(key);
-            if (full != null && full.hasRows()) {
-                return NeedsResolver.Cell.of(QueryProgress.valuesOf(full, column));
-            }
-            return hasColumn(hit.columns(), column)
-                    ? NeedsResolver.Cell.OPAQUE
-                    : NeedsResolver.Cell.EMPTY;
-        };
-    }
-
-    /** 컬럼 목록을 모르면(null) 있다고 본다 — 모름을 부재로 접지 않는다. */
-    private static boolean hasColumn(List<String> columns, String column) {
-        if (columns == null || column == null) {
-            return true;
-        }
-        return columns.stream()
-                .anyMatch(c -> c != null && c.trim().equalsIgnoreCase(column.trim()));
+        return new ArrivalLens(slot.skill(), slot.argsPart(), slot.args(), index, rows, without);
     }
 
     private static String keyOf(RunSlot slot, String queryId) {
@@ -320,7 +483,7 @@ public final class PanelJudge {
     private static Narration narrationOf(
             QueryPool pool, PanelBody body,
             Map<String, SnapshotIndexEntry> index, Map<String, ChatDataSnapshot> rows,
-            List<RunSlot> slots) {
+            List<RunSlot> slots, Map<String, List<AltFillJudge.AltFill>> altFills) {
         PanelEvent event = body.event();
         if (event == null || event.queryKey() == null || event.queryKey().isBlank()) {
             return null;
@@ -347,8 +510,10 @@ public final class PanelJudge {
             return null;
         }
 
-        NeedsResolver.Resolution now = resolve(pool, run, index, rows, null);
-        NeedsResolver.Resolution before = resolve(pool, run, index, rows, eventKey);
+        List<AltFillJudge.AltFill> alt =
+                altFills.getOrDefault(runKey(run.skill(), run.args(), pool), List.of());
+        NeedsResolver.Resolution now = resolve(pool, run, index, rows, null, alt);
+        NeedsResolver.Resolution before = resolve(pool, run, index, rows, eventKey, alt);
         if (!now.terminal() || before.terminal()) {
             return null; // 종결이 아니거나, 이 이벤트 없이도 종결이던 절차다.
         }

@@ -5,7 +5,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import fdc.agent.chat.PanelJudge.PanelBody;
 import fdc.agent.chat.PanelJudge.Verdict;
 import fdc.agent.contract.ChatDataSnapshot;
+import fdc.agent.contract.DataRequest;
 import fdc.agent.contract.PanelEvent;
+import fdc.agent.contract.RequestState;
 import fdc.agent.contract.RunDecl;
 import fdc.agent.contract.RunProgress;
 import fdc.agent.contract.SnapshotIndexEntry;
@@ -207,6 +209,141 @@ class PanelJudgeTest {
         Verdict onBase = PanelJudge.judge(pool(), body(
                 new PanelEvent("snapshot-updated", BASE), null, arrived, declared()));
         assertThat(onBase.narration()).isNotNull();
+    }
+
+    // ── 조달 원장 ────────────────────────────────────────────────────────────
+
+    private static DataRequest ledgerOf(Verdict v, String queryKey) {
+        return v.ledger().stream()
+                .filter(r -> r.queryKey().equals(queryKey))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("원장에 없다: " + queryKey));
+    }
+
+    @Test
+    void 원장은_조달_전량을_상태와_함께_싣는다() {
+        // 잠긴 것도 실린다 — 무엇을 감출지는 화면이 판단하지 않는다.
+        Verdict v = PanelJudge.judge(pool(), body(null, null, null, declared()));
+
+        assertThat(v.ledger()).hasSize(2);
+        DataRequest base = ledgerOf(v, BASE);
+        assertThat(base.state()).isEqualTo(RequestState.READY);
+        assertThat(base.sql()).isEqualTo("SELECT A, B FROM t0 WHERE id = 'X-1'");
+        assertThat(base.needs()).containsExactly("base");
+        assertThat(base.run()).isEqualTo(new RunDecl("t-two-step", Map.of("id", "X-1")));
+
+        DataRequest detail = ledgerOf(v, DETAIL);
+        assertThat(detail.state()).isEqualTo(RequestState.BLOCKED);
+        assertThat(detail.sql()).isNull();
+        assertThat(detail.blocked()).contains("base_row");
+    }
+
+    @Test
+    void 도착하면_원장이_다음_조달을_연다() {
+        Verdict v = PanelJudge.judge(pool(), body(null, null,
+                List.of(baseRow("2026-08-01T00:00", List.of(List.of("a1", "b1")))),
+                declared()));
+
+        assertThat(ledgerOf(v, BASE).state()).isEqualTo(RequestState.ARRIVED);
+        DataRequest detail = ledgerOf(v, DETAIL);
+        assertThat(detail.state()).isEqualTo(RequestState.READY);
+        assertThat(detail.sql()).isEqualTo("SELECT C FROM t1 WHERE a = 'a1'");
+    }
+
+    @Test
+    void 상류가_영행이면_잠김이_아니라_도달불가다() {
+        // 기다리면 열리는 것(BLOCKED)과 영영 안 열리는 것(UNREACHABLE)은 다른 사실이다.
+        Verdict v = PanelJudge.judge(pool(), body(null, null,
+                List.of(baseRow("2026-08-01T00:00", List.of())), declared()));
+
+        assertThat(ledgerOf(v, BASE).state()).isEqualTo(RequestState.ARRIVED);
+        assertThat(ledgerOf(v, DETAIL).state()).isEqualTo(RequestState.UNREACHABLE);
+    }
+
+    @Test
+    void 미선언_절차는_원장에_SQL_을_올리지_않는다() {
+        // T1: 키는 손실 인코딩이라 복원한 args 로 사람이 실행할 문장을 만들지 않는다.
+        Verdict v = PanelJudge.judge(pool(), body(null, null,
+                List.of(baseRow("2026-08-01T00:00", List.of(List.of("a1", "b1")))), null));
+
+        DataRequest detail = ledgerOf(v, DETAIL);
+        assertThat(detail.state()).isEqualTo(RequestState.BLOCKED);
+        assertThat(detail.sql()).isNull();
+        assertThat(detail.blocked()).contains("선언되지 않은");
+    }
+
+    @Test
+    void 같은_상태는_같은_원장이다() {
+        // 원장은 이벤트가 아니라 상태 전량 — 멱등이 규칙이 아니라 구조다.
+        List<ChatDataSnapshot> arrived =
+                List.of(baseRow("2026-08-01T00:00", List.of(List.of("a1", "b1"))));
+
+        assertThat(PanelJudge.judge(pool(), body(null, null, arrived, declared())).ledger())
+                .isEqualTo(PanelJudge.judge(pool(), body(null, null, arrived, declared())).ledger());
+    }
+
+    // ── 2차 채움(다른 경로로 온 같은 사실) ───────────────────────────────────
+
+    @Test
+    void 다른_조달의_표에_그_컬럼이_있으면_채워진다() {
+        // 조달은 수단이고 need 가 목적이다 — 수단이 달랐다고 목적이 안 찬 것은 아니다.
+        ChatDataSnapshot wide = new ChatDataSnapshot(BASE, "기준", "2026-08-01T00:00",
+                List.of("A", "B", "C"), 1, List.of(List.of("a1", "b1", "c9")));
+
+        Verdict v = PanelJudge.judge(pool(), body(null, null, List.of(wide), declared()));
+
+        RunProgress run = v.runsProgress().get(0);
+        assertThat(run.metCount()).isEqualTo(2);
+        assertThat(run.terminal()).isTrue();
+        assertThat(run.outcome()).isEqualTo("SUFFICIENT");
+        RunProgress.Need detail = run.needs().get(1);
+        assertThat(detail.state()).isEqualTo("FILLED");
+        assertThat(detail.source()).isEqualTo(BASE); // 시킨 조회가 아니라는 사실을 남긴다.
+    }
+
+    @Test
+    void 도착한_영행은_2차로_뒤집히지_않는다() {
+        // 0행은 미도착이 아니라 "없다"는 사실 — 다른 표에 값이 보여도 그 사실이 이긴다.
+        ChatDataSnapshot emptyDetail =
+                new ChatDataSnapshot(DETAIL, "상세", "2026-08-01T00:10", List.of("C"), 0, List.of());
+        ChatDataSnapshot wide = new ChatDataSnapshot(BASE, "기준", "2026-08-01T00:00",
+                List.of("A", "B", "C"), 1, List.of(List.of("a1", "b1", "c9")));
+
+        Verdict v = PanelJudge.judge(pool(), body(null, null, List.of(wide, emptyDetail), declared()));
+
+        RunProgress run = v.runsProgress().get(0);
+        assertThat(run.needs().get(1).state()).isEqualTo("UNPROCURABLE");
+        assertThat(run.needs().get(1).source()).isNull();
+    }
+
+    @Test
+    void 자유_저작_표는_인자가_맞는_행에서만_읽는다() {
+        // 이름표가 없는 표는 행 안에서 대조한다 — 표 전체를 믿으면 남의 설비 값이 들어온다.
+        ChatDataSnapshot pasted = new ChatDataSnapshot("붙여넣은-표", "내 표", "2026-08-01T00:00",
+                List.of("id", "C"), 2,
+                List.of(List.of("X-9", "남의값"), List.of("X-1", "내값")));
+
+        Verdict v = PanelJudge.judge(pool(), body(null, null,
+                List.of(baseRow("2026-08-01T00:00", List.of(List.of("a1", "b1"))), pasted),
+                declared()));
+
+        RunProgress run = v.runsProgress().get(0);
+        assertThat(run.needs().get(1).state()).isEqualTo("FILLED");
+        assertThat(run.needs().get(1).source()).isEqualTo("붙여넣은-표");
+        // 이미 아는 사실이라 그 조회는 다시 시키지 않는다.
+        assertThat(ledgerOf(v, DETAIL).state()).isEqualTo(RequestState.INACTIVE);
+    }
+
+    @Test
+    void 대조할_인자가_없는_표는_2차로_안_쓴다() {
+        ChatDataSnapshot pasted = new ChatDataSnapshot("붙여넣은-표", "내 표", "2026-08-01T00:00",
+                List.of("C"), 1, List.of(List.of("어디_것인지_모름")));
+
+        Verdict v = PanelJudge.judge(pool(), body(null, null,
+                List.of(baseRow("2026-08-01T00:00", List.of(List.of("a1", "b1"))), pasted),
+                declared()));
+
+        assertThat(v.runsProgress().get(0).needs().get(1).state()).isEqualTo("UNFILLED");
     }
 
     @Test

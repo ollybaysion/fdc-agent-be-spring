@@ -1,5 +1,6 @@
 package fdc.agent.api;
 
+import fdc.agent.chat.AltFillJudge;
 import fdc.agent.chat.ChatAgent.HistoryMessage;
 import fdc.agent.chat.NarrationPrompt;
 import fdc.agent.chat.PanelJudge;
@@ -29,8 +30,8 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * POST /api/fdc/v1/chat/data — 데이터 패널 판정 인렛(#38, 코드네임 panel-judge).
  * 패널의 모든 수정·입력이 이 인렛을 부르고, {@link PanelJudge} 가 결정론으로
- * 진행·종결을 판정한다. 요청 카드는 응답에 없다 — 카드 배치·SQL 완성은 FE 가
- * 카탈로그(binds 포함)로 로컬 판정한다(demo-fe dataList). 절차 종결 전이만
+ * 진행·종결을 판정한다. 응답에는 <b>조달 원장</b>이 함께 나간다 — 그 절차의 조달
+ * 전량이 상태를 달고 매번 전부 실리고 FE 는 replace 한다. 절차 종결 전이만
  * 그 자리에서 SSE 로 최종 서술을 스트리밍한다(합성 사용자 발화 없음, LLM 1회).
  *
  * <p>응답은 항상 SSE — 서술이 있으면 token* → done, 아니면 done 만.
@@ -75,7 +76,7 @@ public class ChatDataController {
         QueryPool pool = QueryPool.of(specs);
         PanelJudge.Verdict verdict;
         try {
-            verdict = PanelJudge.judge(pool, body);
+            verdict = judgeWithFallbacks(pool, body);
         } catch (Exception err) {
             log.error("chat/data judge error", err);
             int statusCode = err instanceof ApiException api ? api.status() : 500;
@@ -99,6 +100,7 @@ public class ChatDataController {
                 body.eventId(),
                 body.revision(),
                 pool.rev(),
+                verdict.ledger(),
                 verdict.runsProgress(),
                 emptyToNull(verdict.terminalRuns()),
                 text != null ? verdict.narration().runLabel() : null);
@@ -128,6 +130,21 @@ public class ChatDataController {
         } finally {
             res.flushBuffer();
         }
+    }
+
+    /**
+     * 판정 — 결정론 먼저, 그것으로 안 닿은 자리만 LLM 에 묻는다(채움 폭포).
+     *
+     * <p>1·2차({@link PanelJudge})는 무상태 순수함수라 언제나 돈다. 3차
+     * ({@link AltFillJudge})는 <b>못 채운 need 와 결정론이 못 쓴 표가 동시에 있을 때만</b>
+     * 부르고, 새로 채워진 것이 있으면 그것을 얹어 다시 판정한다 — 두 번째 판정도
+     * 같은 결정론 규칙이고, LLM 이 바꾼 것은 입력(무엇이 채워졌나)뿐이다.
+     */
+    private PanelJudge.Verdict judgeWithFallbacks(QueryPool pool, PanelJudge.PanelBody body) {
+        PanelJudge.Verdict deterministic = PanelJudge.judge(pool, body);
+        Map<String, List<AltFillJudge.AltFill>> altFills =
+                AltFillJudge.ask(llm, pool, body, deterministic.runsProgress());
+        return altFills.isEmpty() ? deterministic : PanelJudge.judge(pool, body, altFills);
     }
 
     /**

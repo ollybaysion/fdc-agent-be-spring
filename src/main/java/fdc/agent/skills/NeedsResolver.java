@@ -217,7 +217,21 @@ public final class NeedsResolver {
 
     public static Resolution resolve(
             List<SkillSpec.SkillNeed> needs, Rows rows, Reach reach) {
+        return resolve(needs, rows, reach, Map.of());
+    }
+
+    /**
+     * @param given 조달 배선 밖에서 채워진 need — {@code id → 값}. 채움 폭포의 3차가
+     *     여기로 들어온다: 요청한 조회가 아니라 <b>다른 형태로 받은 데이터</b>에서
+     *     그 사실을 읽어 낸 경우다. 지목한 조달이 없는 need({@code filledBy} 가 빈
+     *     것)도 이 자리로는 채워진다 — 조달 수단이 없다는 것과 알 수 없다는 것은
+     *     다른 말이고, 사람이 이미 알고 있으면 그 사실이 이긴다.
+     *     <p>{@code when} 은 그대로 판정한다. 갈래 밖인 need 는 값을 받아도 비활성이다.
+     */
+    public static Resolution resolve(
+            List<SkillSpec.SkillNeed> needs, Rows rows, Reach reach, Map<String, String> given) {
         List<SkillSpec.SkillNeed> all = needs != null ? needs : List.of();
+        Map<String, String> external = given != null ? given : Map.<String, String>of();
         Map<String, NeedStatus> status = new LinkedHashMap<>();
 
         // 게이트가 앞 need 의 값을 보므로 한 번에 다 정해지지 않는다. 선언 순서에
@@ -228,7 +242,7 @@ public final class NeedsResolver {
                 if (need == null || need.id() == null) {
                     continue;
                 }
-                NeedStatus next = statusOf(need, status, rows, reach);
+                NeedStatus next = statusOf(need, status, rows, reach, external);
                 NeedStatus prev = status.put(need.id(), next);
                 changed |= !next.equals(prev);
             }
@@ -249,13 +263,17 @@ public final class NeedsResolver {
     }
 
     private static NeedStatus statusOf(SkillSpec.SkillNeed need,
-            Map<String, NeedStatus> status, Rows rows, Reach reach) {
+            Map<String, NeedStatus> status, Rows rows, Reach reach, Map<String, String> given) {
         GateState gate = gateOf(need.when(), status);
         if (gate == GateState.SHUT) {
             return new NeedStatus(need.id(), need.what(), State.INACTIVE, null);
         }
         if (gate == GateState.UNKNOWN) {
             return new NeedStatus(need.id(), need.what(), State.PENDING_GATE, null);
+        }
+        String external = given.get(need.id());
+        if (external != null && !external.isBlank()) {
+            return new NeedStatus(need.id(), need.what(), State.FILLED, external.trim());
         }
 
         boolean awaited = false;

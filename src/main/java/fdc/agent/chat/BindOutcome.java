@@ -8,7 +8,7 @@ import java.util.Map;
  *
  * <p>전에는 실패 사유가 예외 메시지 문자열뿐이라, 판정 쪽에서 "pick 이 필요한
  * 상황"을 알아내려면 substring 매칭이 됐다. 여기서 갈래를 타입으로 승격해
- * {@link DataRequestTool}(채팅 경로)과 {@link PanelJudge}(패널 판정 경로)가
+ * {@link RetrieveDataTool}(채팅 경로)과 {@link PanelJudge}(패널 판정 경로)가
  * <b>같은 해석기</b>({@link BindResolver})의 결과를 각자 소비한다 — 채팅은
  * 모델에 되먹일 프로즈로, 판정은 카드/pick/보류로.
  *

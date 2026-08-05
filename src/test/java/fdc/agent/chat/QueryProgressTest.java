@@ -69,8 +69,8 @@ class QueryProgressTest {
                 .contains(ChatPrompt.SECTION_PROGRESS)
                 .contains("알아낸 것: 무엇을 재는 센서인지")
                 .contains("아직 모르는 것: 그 설비의 이름과 모델")
-                .contains("queryId=\"fdc-explain-sensor#equipment_row\","
-                        + " args={\"snsr_id\":\"S-0004\"}");
+                .contains("retrieve_data(skill=\"fdc-explain-sensor\","
+                        + " args={\"snsr_id\":\"S-0004\"})");
     }
 
     @Test
