@@ -90,14 +90,14 @@ class AkgSkillSourceTest {
         return "http://127.0.0.1:" + server.getAddress().getPort();
     }
 
-    /** 번들 explain-sensor spec 을 허브판으로 변형해 적재 — focus 로 출처를 구분한다. */
-    private ObjectNode putSkill(String id, String focus, String rev, String status) throws Exception {
+    /** 번들 explain-sensor spec 을 허브판으로 변형해 적재 — 질문 문구로 출처를 구분한다. */
+    private ObjectNode putSkill(String id, String mark, String rev, String status) throws Exception {
         ObjectNode body;
         try (var in = getClass().getClassLoader()
                 .getResourceAsStream("skills/fdc-explain-sensor.spec.json")) {
             body = (ObjectNode) JSON.readTree(in);
         }
-        body.put("name", id).put("focus", focus);
+        body.put("name", id).set("questions", JSON.createArrayNode().add(mark));
         bodies.put(id, body);
         revs.put(id, rev);
         statuses.put(id, status);
@@ -131,8 +131,8 @@ class AkgSkillSourceTest {
     void 나쁜_spec은_그_스킬만_제외되고_나머지는_산다() throws Exception {
         putSkill("good-skill", "정상 상태", "r1", "active");
         ObjectNode bad = putSkill("bad-skill", "고장 상태", "r1", "active");
-        // 배선 부정합 — binds 가 inputs 에 없는 인자를 참조(validateBinds 거부).
-        ((ObjectNode) bad.path("steps").get(0).path("binds").path("id")).put("arg", "nope");
+        // 배선 부정합 — binds 가 inputs 에 없는 인자를 참조(validateSpec 거부).
+        ((ObjectNode) bad.path("queries").get(0).path("binds").path("id")).put("arg", "nope");
 
         AkgSkillSource source = new AkgSkillSource(startStub(), null, 300);
         List<SkillSpec> specs = source.specs();

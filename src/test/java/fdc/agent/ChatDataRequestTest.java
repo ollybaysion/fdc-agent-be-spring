@@ -28,8 +28,8 @@ import org.junit.jupiter.api.Test;
  */
 class ChatDataRequestTest {
 
-    private static final String SENSOR_KEY_0 = "fdc-explain-sensor#0__snsr_id=S-0004";
-    private static final String SENSOR_KEY_1 = "fdc-explain-sensor#1__snsr_id=S-0004";
+    private static final String SENSOR_KEY = "fdc-explain-sensor#sensor_row__snsr_id=S-0004";
+    private static final String EQUIPMENT_KEY = "fdc-explain-sensor#equipment_row__snsr_id=S-0004";
 
     /** 툴을 한 번 부르고, 되먹은 요약을 최종 답으로 돌려주는 fake. */
     private static LlmClient calls(Map<String, Object> args) {
@@ -55,17 +55,17 @@ class ChatDataRequestTest {
     }
 
     private static ChatDataSnapshot arrived(String key, List<String> cols, List<List<String>> rows) {
-        return new ChatDataSnapshot(key, "앞 단계", "2026-07-28T00:00", cols, rows.size(), rows);
+        return new ChatDataSnapshot(key, "조달", "2026-07-28T00:00", cols, rows.size(), rows);
     }
 
     @Test
     void 풀에서_고른_조회는_실행_가능한_SQL_로_나간다() {
-        AgentResult result = run(request("fdc-explain-sensor#0", Map.of("snsr_id", "S-0004")), null);
+        AgentResult result = run(request("fdc-explain-sensor#sensor_row", Map.of("snsr_id", "S-0004")), null);
 
         assertThat(result.dataRequests()).hasSize(1);
         DataRequest req = result.dataRequests().get(0);
         // 키도 SQL 도 컬럼도 BE 가 만든다 — 모델은 고르고 값만 채웠다.
-        assertThat(req.queryKey()).isEqualTo(SENSOR_KEY_0);
+        assertThat(req.queryKey()).isEqualTo(SENSOR_KEY);
         assertThat(req.sql()).contains("FROM fdc_sensor").contains("snsr_id = 'S-0004'")
                 .doesNotContain(":id");
         assertThat(req.columns()).containsExactly("SNSR_ID", "EQP_ID", "SNSR_TYPE_CD", "UNIT_CD", "USE_YN");
@@ -78,51 +78,51 @@ class ChatDataRequestTest {
 
         assertThat(result.dataRequests()).isEmpty();
         assertThat(result.text()).contains("등재된 조회가 아닙니다")
-                .contains("fdc-explain-sensor#0"); // 목록을 되먹여 다시 고르게 한다
+                .contains("fdc-explain-sensor#sensor_row"); // 목록을 되먹여 다시 고르게 한다
     }
 
     @Test
-    void 앞_단계가_도착해_있으면_그_값으로_이어간다() {
+    void 앞_조달이_도착해_있으면_그_값으로_이어간다() {
         AgentResult result = run(
-                request("fdc-explain-sensor#1", Map.of("snsr_id", "S-0004")),
-                List.of(arrived(SENSOR_KEY_0, List.of("SNSR_ID", "EQP_ID"),
+                request("fdc-explain-sensor#equipment_row", Map.of("snsr_id", "S-0004")),
+                List.of(arrived(SENSOR_KEY, List.of("SNSR_ID", "EQP_ID"),
                         List.of(List.of("S-0004", "CVD-01")))));
 
         assertThat(result.dataRequests()).hasSize(1);
         // eqp 는 모델이 아니라 붙여넣은 표에서 나왔다.
         assertThat(result.dataRequests().get(0).sql()).contains("eqp_id = 'CVD-01'");
-        assertThat(result.dataRequests().get(0).queryKey()).isEqualTo(SENSOR_KEY_1);
+        assertThat(result.dataRequests().get(0).queryKey()).isEqualTo(EQUIPMENT_KEY);
     }
 
     @Test
     void 이어가기에서_인자를_빼먹어도_진행_중인_절차가_하나면_붙는다() {
         Map<String, Object> noArgs = new LinkedHashMap<>();
-        noArgs.put("queryId", "fdc-explain-sensor#1");
+        noArgs.put("queryId", "fdc-explain-sensor#equipment_row");
         noArgs.put("args", Map.of());
 
         AgentResult result = run(noArgs,
-                List.of(arrived(SENSOR_KEY_0, List.of("EQP_ID"), List.of(List.of("CVD-01")))));
+                List.of(arrived(SENSOR_KEY, List.of("EQP_ID"), List.of(List.of("CVD-01")))));
 
         assertThat(result.dataRequests()).hasSize(1);
-        assertThat(result.dataRequests().get(0).queryKey()).isEqualTo(SENSOR_KEY_1);
+        assertThat(result.dataRequests().get(0).queryKey()).isEqualTo(EQUIPMENT_KEY);
     }
 
     @Test
-    void 앞_단계가_안_왔으면_그_단계를_먼저_요청하라고_되먹인다() {
-        AgentResult result = run(request("fdc-explain-sensor#1", Map.of("snsr_id", "S-0004")), null);
+    void 앞_조달이_안_왔으면_그_단계를_먼저_요청하라고_되먹인다() {
+        AgentResult result = run(request("fdc-explain-sensor#equipment_row", Map.of("snsr_id", "S-0004")), null);
 
         assertThat(result.dataRequests()).isEmpty();
-        assertThat(result.text()).contains("1단계 결과가 먼저 필요합니다")
-                .contains("fdc-explain-sensor#0");
+        assertThat(result.text()).contains("sensor_row 결과가 먼저 필요합니다")
+                .contains("fdc-explain-sensor#sensor_row");
     }
 
     @Test
-    void 앞_단계가_0행이면_이어가지_않고_없다는_사실로_답하게_한다() {
+    void 앞_조달이_0행이면_이어가지_않고_없다는_사실로_답하게_한다() {
         // 0행은 "아직 안 왔다"가 아니다 — 절차는 여기서 정상 종료다.
         ChatDataSnapshot empty = new ChatDataSnapshot(
-                SENSOR_KEY_0, "1단계", "2026-07-28T00:00", List.of("SNSR_ID", "EQP_ID"), 0, List.of());
+                SENSOR_KEY, "1단계", "2026-07-28T00:00", List.of("SNSR_ID", "EQP_ID"), 0, List.of());
 
-        AgentResult result = run(request("fdc-explain-sensor#1", Map.of("snsr_id", "S-0004")),
+        AgentResult result = run(request("fdc-explain-sensor#equipment_row", Map.of("snsr_id", "S-0004")),
                 List.of(empty));
 
         assertThat(result.dataRequests()).isEmpty();
@@ -130,16 +130,16 @@ class ChatDataRequestTest {
     }
 
     @Test
-    void 앞_단계가_여러_행이면_고르라고_되먹이고_고른_값만_통과시킨다() {
-        List<ChatDataSnapshot> twoRows = List.of(arrived(SENSOR_KEY_0,
+    void 앞_조달이_여러_행이면_고르라고_되먹이고_고른_값만_통과시킨다() {
+        List<ChatDataSnapshot> twoRows = List.of(arrived(SENSOR_KEY,
                 List.of("SNSR_ID", "EQP_ID"),
                 List.of(List.of("S-0004", "CVD-01"), List.of("S-0004", "ETCH-01"))));
 
-        AgentResult ambiguous = run(request("fdc-explain-sensor#1", Map.of("snsr_id", "S-0004")), twoRows);
+        AgentResult ambiguous = run(request("fdc-explain-sensor#equipment_row", Map.of("snsr_id", "S-0004")), twoRows);
         assertThat(ambiguous.dataRequests()).isEmpty();
         assertThat(ambiguous.text()).contains("여러 값입니다").contains("CVD-01, ETCH-01");
 
-        Map<String, Object> picked = request("fdc-explain-sensor#1", Map.of("snsr_id", "S-0004"));
+        Map<String, Object> picked = request("fdc-explain-sensor#equipment_row", Map.of("snsr_id", "S-0004"));
         picked.put("pick", Map.of("EQP_ID", "ETCH-01"));
         AgentResult chosen = run(picked, twoRows);
         assertThat(chosen.dataRequests()).hasSize(1);
@@ -149,10 +149,10 @@ class ChatDataRequestTest {
     @Test
     void 표에_없는_값은_pick_으로도_넣지_못한다() {
         // 갈림길은 모델에 맡기되 창작은 막는다.
-        Map<String, Object> invented = request("fdc-explain-sensor#1", Map.of("snsr_id", "S-0004"));
+        Map<String, Object> invented = request("fdc-explain-sensor#equipment_row", Map.of("snsr_id", "S-0004"));
         invented.put("pick", Map.of("EQP_ID", "NOT-REAL"));
 
-        AgentResult result = run(invented, List.of(arrived(SENSOR_KEY_0,
+        AgentResult result = run(invented, List.of(arrived(SENSOR_KEY,
                 List.of("SNSR_ID", "EQP_ID"),
                 List.of(List.of("S-0004", "CVD-01"), List.of("S-0004", "ETCH-01")))));
 
@@ -162,8 +162,8 @@ class ChatDataRequestTest {
 
     @Test
     void 이미_도착한_데이터는_다시_요청하지_않는다() {
-        AgentResult result = run(request("fdc-explain-sensor#0", Map.of("snsr_id", "S-0004")),
-                List.of(arrived(SENSOR_KEY_0, List.of("SNSR_ID"), List.of(List.of("S-0004")))));
+        AgentResult result = run(request("fdc-explain-sensor#sensor_row", Map.of("snsr_id", "S-0004")),
+                List.of(arrived(SENSOR_KEY, List.of("SNSR_ID"), List.of(List.of("S-0004")))));
 
         assertThat(result.dataRequests()).isEmpty();
         assertThat(result.text()).contains("이미 도착한 데이터");
@@ -172,9 +172,9 @@ class ChatDataRequestTest {
     @Test
     void 결과_0행으로_확인된_조회도_다시_요청하지_않는다() {
         ChatDataSnapshot empty = new ChatDataSnapshot(
-                SENSOR_KEY_0, "1단계", "2026-07-28T00:00", List.of("SNSR_ID"), 0, List.of());
+                SENSOR_KEY, "1단계", "2026-07-28T00:00", List.of("SNSR_ID"), 0, List.of());
 
-        AgentResult result = run(request("fdc-explain-sensor#0", Map.of("snsr_id", "S-0004")),
+        AgentResult result = run(request("fdc-explain-sensor#sensor_row", Map.of("snsr_id", "S-0004")),
                 List.of(empty));
 
         assertThat(result.dataRequests()).isEmpty();
@@ -185,9 +185,9 @@ class ChatDataRequestTest {
     void 키만_있고_내용이_안_온_항목은_다시_요청할_수_있다() {
         // 억제 기준은 "키가 있나"가 아니라 "도착했나"다 — 아니면 영영 못 받는다.
         ChatDataSnapshot catalogOnly = new ChatDataSnapshot(
-                SENSOR_KEY_0, "1단계", "2026-07-28T00:00", List.of("SNSR_ID"), 5, null);
+                SENSOR_KEY, "1단계", "2026-07-28T00:00", List.of("SNSR_ID"), 5, null);
 
-        AgentResult result = run(request("fdc-explain-sensor#0", Map.of("snsr_id", "S-0004")),
+        AgentResult result = run(request("fdc-explain-sensor#sensor_row", Map.of("snsr_id", "S-0004")),
                 List.of(catalogOnly));
 
         assertThat(result.dataRequests()).hasSize(1);
@@ -195,7 +195,7 @@ class ChatDataRequestTest {
 
     @Test
     void 필수_인자가_없으면_요청하지_않고_사유를_되먹인다() {
-        AgentResult result = run(request("fdc-trace-reading#0", Map.of("equipment", "CVD-01")), null);
+        AgentResult result = run(request("fdc-trace-reading#reading_stats", Map.of("equipment", "CVD-01")), null);
 
         assertThat(result.dataRequests()).isEmpty();
         assertThat(result.text()).contains("인자가 모자라").contains("param_index");
@@ -205,12 +205,12 @@ class ChatDataRequestTest {
     void 인자를_JSON_문자열로_보내도_받는다() {
         // 중첩 객체를 스키마대로 못 내는 모델이 통째로 따옴표에 싸서 보낸다.
         Map<String, Object> stringified = new LinkedHashMap<>();
-        stringified.put("queryId", "fdc-explain-sensor#0");
+        stringified.put("queryId", "fdc-explain-sensor#sensor_row");
         stringified.put("args", "{\"snsr_id\": \"S-0004\"}");
 
         assertThat(run(stringified, null).dataRequests())
                 .singleElement()
-                .extracting(DataRequest::queryKey).isEqualTo(SENSOR_KEY_0);
+                .extracting(DataRequest::queryKey).isEqualTo(SENSOR_KEY);
     }
 
     @Test
@@ -223,11 +223,11 @@ class ChatDataRequestTest {
         };
         new ChatAgent(capture, SkillRegistry.FIXTURE_SKILL_QUERY).run(
                 List.of(new HistoryMessage(Role.USER, "등록 완료")),
-                List.of(arrived(SENSOR_KEY_0, List.of("SNSR_ID", "EQP_ID"),
+                List.of(arrived(SENSOR_KEY, List.of("SNSR_ID", "EQP_ID"),
                         List.of(List.of("S-0004", "CVD-01")))));
 
         assertThat(String.join("\n", systems))
                 .contains("[조회 절차 진행 상황]")
-                .contains("queryId=\"fdc-explain-sensor#1\"");
+                .contains("queryId=\"fdc-explain-sensor#equipment_row\"");
     }
 }

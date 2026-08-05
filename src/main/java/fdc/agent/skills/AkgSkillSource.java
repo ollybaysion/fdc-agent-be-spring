@@ -140,7 +140,7 @@ public final class AkgSkillSource implements SkillSource, AkgSource {
                 return; // 목록과 fetch 사이에 비활성화됨
             }
             SkillSpec spec = JSON.treeToValue(doc.path("json").path("body"), SkillSpec.class);
-            SkillLoader.validateBinds(spec); // 나쁜 배선은 여기서 걸러 챗을 못 죽이게
+            SkillLoader.validateSpec(spec); // 나쁜 선언은 여기서 걸러 챗을 못 죽이게
             next.put(id, new Cached(doc.path("rev").asText(listRev), spec));
         } catch (Exception e) {
             if (had != null) {

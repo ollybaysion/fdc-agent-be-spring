@@ -1,6 +1,7 @@
 package fdc.agent.chat;
 
 import fdc.agent.contract.ChatDataSnapshot;
+import fdc.agent.skills.NeedsResolver;
 import fdc.agent.skills.QueryPool;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -12,52 +13,35 @@ import java.util.Set;
 /**
  * 조회 절차가 어디까지 왔나 — <b>도착한 스냅샷에서 유도한다</b>.
  *
- * <p>진행을 어디에도 저장하지 않는 게 요점이다. {@link QueryKey} 가 한 절차의 모든 단계에
- * 같은 run 이름표를 달아 주므로, 이번 요청에 실려 온 스냅샷들의 키만 풀에 비추면
- * "fdc-explain-sensor(snsr_id=S-0004)는 1단계까지 왔고 다음은 2단계"가 나온다.
- * 계약에 {@code progress} 필드가 없어도 되고, 서버가 세션을 들고 있지 않아도 된다 —
- * <b>진행은 상태가 아니라 도착의 결과다.</b>
+ * <p>진행을 어디에도 저장하지 않는 게 요점이다. {@link QueryKey} 가 한 절차의 모든
+ * 조달에 같은 run 이름표를 달아 주므로, 이번 요청에 실려 온 스냅샷들의 키만 풀에
+ * 비추면 그 절차가 무엇을 알아냈는지가 나온다. 계약에 {@code progress} 필드가 없어도
+ * 되고, 서버가 세션을 들고 있지 않아도 된다 — <b>진행은 상태가 아니라 도착의 결과다.</b>
  *
- * <p>여기서 나온 한 걸음이 맥락 섹션에 실려 모델을 밀어 준다. 다만 밀 뿐이다:
- * 멈추는 판단(질문에 답하기 충분한가, 0행으로 끝났는가)은 모델이 한다.
+ * <p>진행의 단위는 v3 에서 <b>단계에서 need 로</b> 바뀌었다. "3단계 중 1단계 도착"이
+ * 아니라 "물리인지 가상인지는 알아냈고 VID 는 아직"이다 — 모델에게 남은 걸음을
+ * 밀어 주는 문장이 조회의 이름이 아니라 <b>답에 모자란 것</b>을 말한다.
  *
  * <p>풀 형식이 아닌 키(옛 자유 저작 스냅샷)는 조용히 빠진다 — 적재도 억제도 그대로 받되
  * 진행으로는 읽지 않는다.
  */
 public final class QueryProgress {
 
-    /** 한 단계의 도착 여부. {@code emptyResult} 는 도착했고 그 결과가 0행이라는 뜻이다. */
-    public record Step(int index, String title, boolean arrived, boolean emptyResult) {
+    /** 한 절차 = (스킬, run 이름표) 하나와 그 판정. */
+    public record Run(
+            String skill,
+            String argsPart,
+            Map<String, String> args,
+            NeedsResolver.Resolution resolution) {
     }
 
-    /** 한 절차의 진행 = (스킬, run 이름표) 하나. */
-    public record Run(String skill, String argsPart, Map<String, String> args, List<Step> steps) {
-
-        /** 아직 도착하지 않은 첫 단계. 전부 도착했으면 -1. */
-        public int nextStep() {
-            for (Step s : steps) {
-                if (!s.arrived()) {
-                    return s.index();
-                }
-            }
-            return -1;
-        }
-
-        /** 0행으로 확인된 단계가 있으면 그 단계, 없으면 null — 절차는 거기서 끝난다. */
-        public Step emptyAt() {
-            for (Step s : steps) {
-                if (s.emptyResult()) {
-                    return s;
-                }
-            }
-            return null;
-        }
-    }
-
+    private final QueryPool pool;
     private final Map<String, ChatDataSnapshot> arrivedByKey;
     private final List<Run> runs;
 
-    private QueryProgress(Map<String, ChatDataSnapshot> arrivedByKey, List<Run> runs) {
+    private QueryProgress(
+            QueryPool pool, Map<String, ChatDataSnapshot> arrivedByKey, List<Run> runs) {
+        this.pool = pool;
         this.arrivedByKey = arrivedByKey;
         this.runs = runs;
     }
@@ -77,33 +61,39 @@ public final class QueryProgress {
             }
             arrived.put(s.queryKey().trim(), s);
             QueryKey.Parsed parsed = QueryKey.parse(s.queryKey());
-            QueryPool.Query query =
-                    parsed == null ? null : pool.byId(parsed.skill() + "#" + parsed.step());
+            QueryPool.Query query = parsed == null ? null : pool.byId(parsed.queryId());
             if (query == null) {
                 continue; // 풀 밖 키 — 억제엔 쓰이되 진행으로는 읽지 않는다.
             }
-            // 스킬 이름은 풀의 것으로 쓴다 — 키의 표기가 흔들려도 단계 목록을 못 찾는 일이
-            // 없게(byId 는 표기 차이를 흡수하지만 stepsOf 는 정식 이름만 안다).
+            // 스킬 이름은 풀의 것으로 쓴다 — 키의 표기가 흔들려도 needs 를 못 찾는 일이
+            // 없게(byId 는 표기 차이를 흡수하지만 needsOf 는 정식 이름만 안다).
             seen.add(new RunId(query.skill(), parsed.argsPart()));
         }
 
         List<Run> runs = new ArrayList<>();
         for (RunId id : seen) {
-            List<Step> steps = new ArrayList<>();
-            for (QueryPool.Query q : pool.stepsOf(id.skill())) {
-                String key = id.argsPart().isEmpty()
-                        ? q.queryId()
-                        : q.queryId() + "__" + id.argsPart();
-                ChatDataSnapshot hit = arrived.get(key);
-                steps.add(new Step(q.step(), q.title(), hit != null,
-                        hit != null && hit.isEmptyResult()));
-            }
-            if (!steps.isEmpty()) {
-                runs.add(new Run(id.skill(), id.argsPart(),
-                        QueryKey.parseArgs(id.argsPart()), List.copyOf(steps)));
-            }
+            NeedsResolver.Rows rows = rowsOf(arrived, id.skill(), id.argsPart());
+            NeedsResolver.Resolution resolution = NeedsResolver.resolve(pool.needsOf(id.skill()),
+                    rows, NeedsResolver.reachOf(pool.wiringOf(id.skill()), rows));
+            runs.add(new Run(id.skill(), id.argsPart(),
+                    QueryKey.parseArgs(id.argsPart()), resolution));
         }
-        return new QueryProgress(Map.copyOf(arrived), List.copyOf(runs));
+        return new QueryProgress(pool, Map.copyOf(arrived), List.copyOf(runs));
+    }
+
+    /**
+     * 판정기가 도착 데이터를 읽는 창구 — 이 run 의 이름표를 붙여 키를 만들어 본다.
+     * 미도착이면 {@code null}, 도착했으면 그 컬럼의 값들(0행이면 빈 목록).
+     */
+    static NeedsResolver.Rows rowsOf(
+            Map<String, ChatDataSnapshot> arrived, String skill, String argsPart) {
+        return (queryId, column) -> {
+            String key = argsPart == null || argsPart.isEmpty()
+                    ? skill + "#" + queryId
+                    : skill + "#" + queryId + "__" + argsPart;
+            ChatDataSnapshot hit = arrived.get(key);
+            return hit == null ? null : NeedsResolver.Cell.of(valuesOf(hit, column));
+        };
     }
 
     public List<Run> runs() {
@@ -150,8 +140,8 @@ public final class QueryProgress {
     }
 
     /**
-     * 맥락에 실을 진행 상황 — 다음 한 걸음을 그대로 부를 수 있게 적어 준다. 진행 중인
-     * 절차가 없으면 null(주입 안 함).
+     * 맥락에 실을 진행 상황 — 알아낸 것과 모자란 것, 그리고 다음 한 걸음을 그대로
+     * 부를 수 있게 적어 준다. 진행 중인 절차가 없으면 null(주입 안 함).
      */
     public String promptSection() {
         if (runs.isEmpty()) {
@@ -160,25 +150,42 @@ public final class QueryProgress {
         List<String> lines = new ArrayList<>();
         lines.add(ChatPrompt.SECTION_PROGRESS);
         for (Run run : runs) {
-            String head = "- " + run.skill() + label(run) + ": ";
-            Step empty = run.emptyAt();
-            if (empty != null) {
-                lines.add(head + (empty.index() + 1) + "단계 조회 결과 0행 — 데이터가 없음이 확인됐다.");
-                lines.add("  더 요청하지 말고 \"그 조건으로는 데이터가 없다\"고 답하라.");
-                continue;
+            lines.add("- " + run.skill() + label(run) + ":");
+            List<NeedsResolver.NeedStatus> filled =
+                    run.resolution().in(NeedsResolver.State.FILLED);
+            if (!filled.isEmpty()) {
+                lines.add("  알아낸 것: " + String.join(", ", whats(filled)));
             }
-            long done = run.steps().stream().filter(Step::arrived).count();
-            int next = run.nextStep();
-            if (next < 0) {
-                lines.add(head + run.steps().size() + "단계 모두 도착 — 받은 데이터로 답하라.");
-                continue;
+            List<NeedsResolver.NeedStatus> unmet = run.resolution().unmet();
+            if (!unmet.isEmpty()) {
+                lines.add("  아직 모르는 것: " + String.join(", ", whats(unmet)));
             }
-            lines.add(head + run.steps().size() + "단계 중 " + done + "단계 도착.");
-            lines.add("  다음 = " + run.steps().get(next).title()
-                    + " — " + DataRequestTool.NAME + "(queryId=\"" + run.skill() + "#" + next
-                    + "\", args=" + argsJson(run.args()) + ")");
+            lines.addAll(verdictLines(run));
         }
         return String.join("\n", lines);
+    }
+
+    /** 판정에 따른 지시 — 조달할 것이 있으면 그 한 줄, 없으면 답하라는 지시다. */
+    private List<String> verdictLines(Run run) {
+        return switch (run.resolution().outcome()) {
+            case SUFFICIENT -> List.of("  알아야 할 것을 모두 확인했다 — 받은 데이터로 답하라.");
+            case UNANSWERABLE -> List.of(
+                    "  더 조달할 수단이 없다 — 모르는 것은 확인되지 않았다는 사실로 답하고,"
+                            + " 더 요청하지 마라.");
+            case PROCURABLE -> {
+                String next = run.resolution().wanted().stream().findFirst().orElse(null);
+                QueryPool.Query query = next == null ? null : pool.byId(run.skill() + "#" + next);
+                if (query == null) {
+                    yield List.of();
+                }
+                yield List.of("  다음 = " + query.label() + " — " + DataRequestTool.NAME
+                        + "(queryId=\"" + query.queryId() + "\", args=" + argsJson(run.args()) + ")");
+            }
+        };
+    }
+
+    private static List<String> whats(List<NeedsResolver.NeedStatus> needs) {
+        return needs.stream().map(NeedsResolver.NeedStatus::what).toList();
     }
 
     private static String label(Run run) {

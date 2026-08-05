@@ -21,7 +21,7 @@ import org.springframework.test.web.servlet.MockMvc;
 @AutoConfigureMockMvc
 class ChatDataApiTest {
 
-    private static final String KEY0 = "fdc-explain-sensor#0__snsr_id=S-0004";
+    private static final String KEY0 = "fdc-explain-sensor#sensor_row__snsr_id=S-0004";
 
     @Autowired
     private MockMvc mvc;
@@ -50,11 +50,12 @@ class ChatDataApiTest {
         assertThat(done.path("revision").asInt()).isEqualTo(3);
         assertThat(done.path("poolRev").asText()).isNotEmpty();
         assertThat(done.has("openRequests")).isFalse();
-        assertThat(done.path("runsProgress").get(0).path("nextStep").asInt()).isZero();
+        assertThat(done.path("runsProgress").get(0).path("outcome").asText())
+                .isEqualTo("PROCURABLE");
     }
 
     @Test
-    void 단계가_도착하면_진행이_갱신된다() throws Exception {
+    void 조달이_도착하면_그_need_가_찬_것으로_보고된다() throws Exception {
         MockHttpServletResponse res = chatData("""
                 {"eventId":"e2","revision":4,
                  "runs":[{"skill":"fdc-explain-sensor","args":{"snsr_id":"S-0004"}}],
@@ -66,8 +67,11 @@ class ChatDataApiTest {
         JsonNode done = SseTestSupport.donePayload(res.getContentAsString(StandardCharsets.UTF_8));
 
         JsonNode run = done.path("runsProgress").get(0);
-        assertThat(run.path("arrivedCount").asInt()).isEqualTo(1);
-        assertThat(run.path("nextStep").asInt()).isEqualTo(1);
+        // EQP_ID 는 왔지만 종류·단위·상태 컬럼은 이 표에 없다 — 찬 것만 찬 것으로 센다.
+        assertThat(run.path("metCount").asInt()).isEqualTo(1);
+        assertThat(run.path("outcome").asText()).isEqualTo("PROCURABLE");
+        assertThat(run.path("wanted").get(0).asText())
+                .isEqualTo("fdc-explain-sensor#equipment_row");
         assertThat(run.path("terminal").asBoolean()).isFalse();
     }
 

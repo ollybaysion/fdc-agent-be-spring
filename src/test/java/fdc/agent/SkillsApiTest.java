@@ -71,43 +71,68 @@ class SkillsApiTest {
     }
 
     @Test
-    void 스텝은_SQL과_bind_출처를_구분해_준다() throws Exception {
-        // argBinds = 사용자가 채울 수 있는 자리, priorStepBinds = 앞 조회 결과가 채우는 자리.
+    void 조달은_SQL과_bind_출처를_구분해_준다() throws Exception {
+        // argBinds = 사용자가 채울 수 있는 자리, priorQueryBinds = 앞 조회 결과가 채우는 자리.
         JsonNode trace = byName(skills(), "fdc-trace-reading");
         assertThat(trace).isNotNull();
 
-        JsonNode step0 = trace.path("steps").get(0);
-        assertThat(step0.path("sql").asText()).contains(":eqp");
-        assertThat(step0.path("argBinds").path("eqp").asText()).isEqualTo("equipment");
-        assertThat(step0.path("argBinds").path("pidx").asText()).isEqualTo("param_index");
-        assertThat(step0.path("priorStepBinds")).isEmpty();
+        JsonNode stats = byId(trace.path("queries"), "reading_stats");
+        assertThat(stats.path("sql").asText()).contains(":eqp");
+        assertThat(stats.path("argBinds").path("eqp").asText()).isEqualTo("equipment");
+        assertThat(stats.path("argBinds").path("pidx").asText()).isEqualTo("param_index");
+        assertThat(stats.path("priorQueryBinds")).isEmpty();
 
-        // explain-sensor 2단계는 1단계 결과(EQP_ID)로 묶인다 — FE 가 채울 수 없는 자리.
+        // explain-sensor 의 설비 조회는 센서 조회 결과(EQP_ID)로 묶인다 — FE 가 못 채우는 자리.
         JsonNode explain = byName(skills(), "fdc-explain-sensor");
         assertThat(explain).isNotNull();
-        JsonNode dependent = explain.path("steps").get(1);
+        JsonNode dependent = byId(explain.path("queries"), "equipment_row");
         List<String> prior = new ArrayList<>();
-        dependent.path("priorStepBinds").forEach(b -> prior.add(b.asText()));
+        dependent.path("priorQueryBinds").forEach(b -> prior.add(b.asText()));
         assertThat(prior).containsExactly("eqp");
         assertThat(dependent.path("argBinds")).isEmpty();
     }
 
     @Test
-    void 스텝은_bind_배선_전문을_준다() throws Exception {
-        // binds = 배선 전문 — FE 가 판정 왕복 없이 스텝 상태를 파생하는 재료(dataList).
+    void 조달은_bind_배선_전문을_준다() throws Exception {
+        // binds = 배선 전문 — FE 가 판정 왕복 없이 슬롯 상태를 파생하는 재료(dataList).
         JsonNode trace = byName(skills(), "fdc-trace-reading");
         assertThat(trace).isNotNull();
-        JsonNode step0 = trace.path("steps").get(0);
-        assertThat(step0.path("binds").path("eqp").path("from").asText()).isEqualTo("arg");
-        assertThat(step0.path("binds").path("eqp").path("arg").asText()).isEqualTo("equipment");
-        assertThat(step0.path("binds").path("eqp").has("step")).isFalse();
+        JsonNode stats = byId(trace.path("queries"), "reading_stats");
+        assertThat(stats.path("binds").path("eqp").path("from").asText()).isEqualTo("arg");
+        assertThat(stats.path("binds").path("eqp").path("arg").asText()).isEqualTo("equipment");
+        assertThat(stats.path("binds").path("eqp").has("query")).isFalse();
 
         JsonNode explain = byName(skills(), "fdc-explain-sensor");
         assertThat(explain).isNotNull();
-        JsonNode wired = explain.path("steps").get(1).path("binds").path("eqp");
-        assertThat(wired.path("from").asText()).isEqualTo("step");
-        assertThat(wired.path("step").asInt()).isEqualTo(0);
+        JsonNode wired = byId(explain.path("queries"), "equipment_row").path("binds").path("eqp");
+        assertThat(wired.path("from").asText()).isEqualTo("query");
+        assertThat(wired.path("query").asText()).isEqualTo("sensor_row");
         assertThat(wired.path("column").asText()).isEqualTo("EQP_ID");
         assertThat(wired.has("arg")).isFalse();
+    }
+
+    @Test
+    void needs_가_실려_FE_가_갈래를_로컬로_판정한다() throws Exception {
+        // v2 에는 "이 조회가 지금 필요한가"를 FE 가 알 재료가 없었다 — when 이 그 자리다.
+        JsonNode explain = byName(skills(), "fdc-explain-sensor");
+        assertThat(explain).isNotNull();
+
+        JsonNode gated = byId(explain.path("needs"), "equipment_active");
+        assertThat(gated.path("when").asText()).isEqualTo("sensor_active = N");
+        assertThat(gated.path("filledBy").get(0).path("query").asText()).isEqualTo("equipment_row");
+        assertThat(gated.path("filledBy").get(0).path("column").asText()).isEqualTo("USE_YN");
+
+        // 조건 없는 need 는 when 을 아예 싣지 않는다(있음/없음이 곧 조건부 여부).
+        assertThat(byId(explain.path("needs"), "sensor_active").has("when")).isFalse();
+    }
+
+    /** {@code id} 로 배열 원소 하나 — 목록 순서에 기대지 않는다(카탈로그는 순서가 없다). */
+    private static JsonNode byId(JsonNode array, String id) {
+        for (JsonNode node : array) {
+            if (id.equals(node.path("id").asText())) {
+                return node;
+            }
+        }
+        throw new AssertionError("id 없음: " + id);
     }
 }

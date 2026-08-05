@@ -7,6 +7,7 @@ import fdc.agent.contract.ChatTable;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -14,15 +15,22 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * skill-loader — forge-domain-skill 의 spec.json(v2) 을 에이전트 툴로 컴파일.
- * 하이브리드(C) 모델: 조회(steps[].sql)는 코드가 순서·bind 로 결정론 실행,
- * 출력 지침(서술 지시·반드시 포함·avoid·examples)은 번역 없이 프로즈 그대로
- * 결과에 실어 LLM 이 자연어 서술에 참고하게 한다. LLM 은 SQL 을 보지 않는다.
+ * skill-loader — domain-skill spec(v3)을 에이전트 툴로 컴파일. 하이브리드(C) 모델:
+ * 조달은 코드가 결정론으로 실행하고, 출력 지침(서술 지시·반드시 포함·avoid·examples)은
+ * 번역 없이 프로즈 그대로 결과에 실어 LLM 이 자연어 서술에 참고하게 한다. LLM 은
+ * SQL 을 보지 않는다.
  *
- * <p>{@code description} 은 spec 필드가 아니라 여기서 합성된다 — 합성 결과를
- * 공유 픽스처로 묶지 않고 소비자가 각자 만들기로 한 결정이라(foundry 설계
- * §4-1), 아래 골격은 foundry {@code render-skill.mjs} 의 것을 그대로 옮긴
- * 것이다. 골격이 바뀌면 같이 고칠 것.
+ * <p><b>실행 순서가 spec 에서 사라졌다.</b> v2 는 {@code steps[]} 를 위에서 아래로
+ * 돌렸지만 v3 의 {@code queries[]} 는 카탈로그다. 대신 <b>무엇이 도는지는 유도된다</b>:
+ * 알아야 할 것 중 아직 못 채운 것이 지목한 조달만 돌고, 한 바퀴 돌 때마다 다시
+ * 판정한다({@link NeedsResolver}). 갈림형 분기가 코드에서 사라진 것도 이것 때문이다 —
+ * {@code sensor_kind = PHYSICAL} 일 때만 활성인 need 는 물리 센서일 때만 자기 조달을
+ * 부른다. 가상 센서 쪽 조회는 아예 돌지 않으므로 "0행"으로 오해될 일도 없다.
+ *
+ * <p>{@code description} 은 spec 필드가 아니라 여기서 합성된다 — 합성 결과를 공유
+ * 픽스처로 묶지 않고 소비자가 각자 만들기로 한 결정이라(foundry 설계 §4-1), 아래
+ * 골격은 akg {@code src/render/domain-skill.mjs} 의 것을 그대로 옮긴 것이다.
+ * 골격이 바뀌면 같이 고칠 것.
  */
 public final class SkillLoader {
     private SkillLoader() {
@@ -31,7 +39,7 @@ public final class SkillLoader {
     private static final ObjectMapper JSON = new ObjectMapper();
 
     public static AgentTool loadSkill(SkillSpec spec, SkillQuery query) {
-        validateBinds(spec);
+        validateSpec(spec);
         String toolName = spec.name().replace("-", "_");
         Map<String, Object> properties = new LinkedHashMap<>();
         for (SkillSpec.SkillInput p : spec.inputs()) {
@@ -56,34 +64,55 @@ public final class SkillLoader {
     private static final Pattern BIND_VAR = Pattern.compile(":([A-Za-z][A-Za-z0-9_]*)");
 
     /**
-     * 로드 시 배선 검증 — akg envelope.mjs 시맨틱 체크와 같은 3종(인자 실재 ·
-     * 앞 스텝만 · SQL {@code :var} 집합과 정확 일치). 실행기의 책임은 배선의
-     * 저작이 아니라 나쁜 선언의 거부다: 어긋난 spec 은 런타임 침묵 스킵이
-     * 아니라 기동 실패로 드러난다(이슈 #7 ②의 이름-매칭 사고 방지).
+     * 로드 시 spec 검증 — akg {@code envelope.mjs} 시맨틱 체크와 같은 것을 본다.
+     * 실행기의 책임은 배선의 저작이 아니라 <b>나쁜 선언의 거부</b>다: 어긋난 spec 은
+     * 런타임 침묵 스킵이 아니라 기동 실패로 드러난다(이슈 #7 ②의 이름-매칭 사고 방지).
      *
-     * <p>public 인 이유: {@link AkgSkillSource} 가 허브에서 받은 spec 을
-     * 수용 전에 같은 검증으로 거른다 — 나쁜 문서 하나가 챗을 못 죽이게.
+     * <p>v3 에서 볼 것이 늘었다 — 배선(인자 실재·대상 조달 실재·{@code :var} 정확
+     * 일치·순환) 위에 <b>needs</b> 가 얹혔다: {@code when} 이 가리키는 need 가 있는가,
+     * 순환하지 않는가, {@code filledBy} 의 컬럼이 그 조달의 SELECT 목록에 있는가.
+     * 마지막 것이 "컬럼까지 못 박는다"는 결정의 안전망이다 — SQL 을 고치고 spec 을
+     * 안 고치는 사고를 여기서 잡는다.
+     *
+     * <p>public 인 이유: {@link AkgSkillSource} 가 허브에서 받은 spec 을 수용 전에
+     * 같은 검증으로 거른다 — 나쁜 문서 하나가 챗을 못 죽이게.
      */
-    public static void validateBinds(SkillSpec spec) {
+    public static void validateSpec(SkillSpec spec) {
         Set<String> inputNames = new HashSet<>();
         for (SkillSpec.SkillInput p : spec.inputs()) {
             inputNames.add(p.name());
         }
-        for (int i = 0; i < spec.steps().size(); i++) {
-            SkillSpec.SkillStep step = spec.steps().get(i);
-            Map<String, SkillSpec.BindSource> binds = step.binds() != null ? step.binds() : Map.of();
-            Set<String> sqlVars = extractBindVars(step.sql());
+
+        Map<String, SkillSpec.SpecQuery> byId = new LinkedHashMap<>();
+        for (SkillSpec.SpecQuery query : spec.queries()) {
+            if (query.id() == null || query.id().isBlank()) {
+                throw new IllegalStateException(spec.name() + ": queries[] 에 id 가 없습니다");
+            }
+            if (byId.putIfAbsent(query.id(), query) != null) {
+                throw new IllegalStateException(spec.name() + ": 조달 id 가 중복입니다: " + query.id());
+            }
+        }
+
+        Map<String, List<String>> queryEdges = new LinkedHashMap<>();
+        for (SkillSpec.SpecQuery query : spec.queries()) {
+            Map<String, SkillSpec.BindSource> binds = query.bindings();
+            Set<String> sqlVars = extractBindVars(query.sql());
+            List<String> deps = new ArrayList<>();
             for (Map.Entry<String, SkillSpec.BindSource> e : binds.entrySet()) {
                 SkillSpec.BindSource src = e.getValue();
-                String at = spec.name() + " steps[" + i + "].binds." + e.getKey();
+                String at = spec.name() + " queries[" + query.id() + "].binds." + e.getKey();
                 if ("arg".equals(src.from())) {
                     if (!inputNames.contains(src.arg())) {
                         throw new IllegalStateException(at + ": no input named \"" + src.arg() + "\"");
                     }
-                } else if ("step".equals(src.from())) {
-                    if (src.step() == null || src.step() < 0 || src.step() >= i) {
-                        throw new IllegalStateException(at + ": step " + src.step() + " is not an earlier step");
+                } else if ("query".equals(src.from())) {
+                    if (src.query() == null || !byId.containsKey(src.query())) {
+                        throw new IllegalStateException(at + ": no query named \"" + src.query() + "\"");
                     }
+                    if (src.query().equals(query.id())) {
+                        throw new IllegalStateException(at + ": 자기 자신을 참조합니다");
+                    }
+                    deps.add(src.query());
                 } else {
                     throw new IllegalStateException(at + ": unknown from \"" + src.from() + "\"");
                 }
@@ -93,11 +122,92 @@ public final class SkillLoader {
             }
             for (String v : sqlVars) {
                 if (!binds.containsKey(v)) {
-                    throw new IllegalStateException(spec.name() + " steps[" + i + "]: sql uses :" + v
-                            + " but binds does not declare it");
+                    throw new IllegalStateException(spec.name() + " queries[" + query.id()
+                            + "]: sql uses :" + v + " but binds does not declare it");
                 }
             }
+            queryEdges.put(query.id(), deps);
         }
+        String queryCycle = firstCycle(queryEdges);
+        if (queryCycle != null) {
+            throw new IllegalStateException(spec.name() + ": 조달 배선이 순환합니다: " + queryCycle);
+        }
+
+        Set<String> needIds = new LinkedHashSet<>();
+        for (SkillSpec.SkillNeed need : spec.needs()) {
+            if (need.id() == null || need.id().isBlank()) {
+                throw new IllegalStateException(spec.name() + ": needs[] 에 id 가 없습니다");
+            }
+            if (!needIds.add(need.id())) {
+                throw new IllegalStateException(spec.name() + ": need id 가 중복입니다: " + need.id());
+            }
+        }
+        Map<String, List<String>> needEdges = new LinkedHashMap<>();
+        for (SkillSpec.SkillNeed need : spec.needs()) {
+            String at = spec.name() + " needs[" + need.id() + "]";
+            List<String> deps = new ArrayList<>();
+            if (need.when() != null && !need.when().isBlank()) {
+                NeedsResolver.Gate gate = NeedsResolver.Gate.parse(need.when());
+                if (gate == null) {
+                    throw new IllegalStateException(at + ".when: 조건식으로 못 읽습니다: " + need.when());
+                }
+                if (!needIds.contains(gate.needId())) {
+                    throw new IllegalStateException(at + ".when: no need named \"" + gate.needId() + "\"");
+                }
+                deps.add(gate.needId());
+            }
+            for (SkillSpec.Fill fill : need.fills()) {
+                SkillSpec.SpecQuery target = byId.get(fill.query());
+                if (target == null) {
+                    throw new IllegalStateException(at + ".filledBy: no query named \""
+                            + fill.query() + "\"");
+                }
+                List<String> columns = SqlRender.columnsOf(target.sql());
+                if (columns != null && columns.stream().noneMatch(c -> c.equalsIgnoreCase(fill.column()))) {
+                    throw new IllegalStateException(at + ".filledBy: " + fill.query()
+                            + " 의 SELECT 목록에 " + fill.column() + " 이 없습니다");
+                }
+            }
+            needEdges.put(need.id(), deps);
+        }
+        String needCycle = firstCycle(needEdges);
+        if (needCycle != null) {
+            throw new IllegalStateException(spec.name() + ": needs 의 when 이 순환합니다: " + needCycle);
+        }
+    }
+
+    /** 순환이 있으면 그 경로를 사람이 읽을 문자열로, 없으면 null. */
+    private static String firstCycle(Map<String, List<String>> edges) {
+        Set<String> done = new HashSet<>();
+        for (String start : edges.keySet()) {
+            List<String> path = new ArrayList<>();
+            String cycle = walk(start, edges, new LinkedHashSet<>(), done, path);
+            if (cycle != null) {
+                return cycle;
+            }
+        }
+        return null;
+    }
+
+    private static String walk(String node, Map<String, List<String>> edges,
+            Set<String> onPath, Set<String> done, List<String> path) {
+        if (done.contains(node)) {
+            return null;
+        }
+        if (!onPath.add(node)) {
+            return String.join(" → ", path) + " → " + node;
+        }
+        path.add(node);
+        for (String next : edges.getOrDefault(node, List.of())) {
+            String cycle = walk(next, edges, onPath, done, path);
+            if (cycle != null) {
+                return cycle;
+            }
+        }
+        path.remove(path.size() - 1);
+        onPath.remove(node);
+        done.add(node);
+        return null;
     }
 
     /** SQL 의 {@code :bind} 변수 추출 — 따옴표 리터럴은 벗긴다(날짜 마스크 ':' 오탐 방지). */
@@ -111,131 +221,174 @@ public final class SkillLoader {
     }
 
     /**
-     * 한국어 조사 일치 — foundry 렌더러와 같은 규칙(합성 결과가 갈리지 않도록).
-     * public 인 이유: 서술 프롬프트({@link fdc.agent.chat.NarrationPrompt})의 답변
-     * 가이드 머리문장이 같은 골격을 합성한다 — 규칙이 두 벌이면 조사만 갈린다.
-     */
-    public static boolean hasFinalConsonant(String text) {
-        String t = text.trim();
-        if (t.isEmpty()) {
-            return false;
-        }
-        char last = t.charAt(t.length() - 1);
-        if (last < 0xAC00 || last > 0xD7A3) {
-            return false;
-        }
-        return (last - 0xAC00) % 28 != 0;
-    }
-
-    /**
-     * 라우팅 문장 합성 — "언제 부르나"(트리거)만 적는다. 골격은 {@code scope.의도}
-     * 가 고르고, 도메인 어휘는 {@code focus} 한 구절뿐이다.
+     * 라우팅 문장 합성 — 사용자가 실제로 던지는 말을 <b>그대로 인용</b>한다. v2 는
+     * {@code scope.의도}+{@code focus} 로 골격을 조립했는데, 그건 분류 어휘라 사람이
+     * 묻는 말과 닮은 데가 없었다. 인용이 곧 라우팅 신호다.
+     *
+     * <p>골격은 akg 렌더러와 같아야 한다 — 갈리면 허브가 만든 SKILL.md 와 여기서 만든
+     * 툴 설명이 서로 다른 문장으로 라우팅한다.
      */
     public static String synthesizeDescription(SkillSpec spec) {
+        String asked = spec.questions().stream().map(q -> "\"" + q + "\"")
+                .collect(java.util.stream.Collectors.joining(", "));
         String when = spec.inputs().stream()
                 .filter(SkillSpec.SkillInput::required)
                 .map(SkillSpec.SkillInput::name)
                 .collect(java.util.stream.Collectors.joining("·")) + " 필요";
-        if ("생성 이력".equals(spec.scope().의도())) {
-            String particle = hasFinalConsonant(spec.focus()) ? "이" : "가";
-            return "특정 " + spec.focus() + particle + " 어떻게 만들어졌는지 묻는 상황에서 호출한다 (" + when + ").";
-        }
-        String particle = hasFinalConsonant(spec.focus()) ? "을" : "를";
-        return "특정 " + spec.scope().단위() + "의 " + spec.focus() + particle
-                + " 묻는 상황에서 호출한다 (" + when + ").";
+        return asked + " 같은 질문에 답한다 (" + when + ").";
     }
 
     /**
-     * 스텝 하나의 결말. <b>실행하지 못한 것과 실행했는데 0행인 것은 다른 사실이다</b> —
-     * 둘 다 "(0행)"으로 적으면 모델은 "그 데이터는 없다"고 단정한다. 앞 단계가 비어
-     * 바인드를 못 채운 스텝은 조회를 시도조차 하지 않았다.
+     * 조달 실행 — <b>필요 → 조달 → 재판정</b>을 더 돌 것이 없을 때까지 반복한다.
+     * 한 바퀴에 돌 수 있는 것을 다 돌리고 다시 판정하는 이유는, 방금 도착한 값이
+     * 다른 need 의 게이트를 열 수 있기 때문이다(물리로 판명되면 그때부터 VID 가
+     * 필요해진다).
+     *
+     * <p>바인드를 못 푼 조달은 이번 바퀴에서 건너뛴다 — 다음 바퀴에 앞 조달이
+     * 도착해 있으면 풀린다. 한 바퀴에 아무것도 못 돌면 끝이다(더 이상 진전 없음).
      */
-    private record StepOutcome(boolean skipped, List<Map<String, Object>> rows) {
-        static StepOutcome notRun() {
-            return new StepOutcome(true, List.of());
+    private static ToolResult runSkill(SkillSpec spec, SkillQuery query, Map<String, Object> args) {
+        Map<String, SkillSpec.SpecQuery> byId = new LinkedHashMap<>();
+        for (SkillSpec.SpecQuery q : spec.queries()) {
+            byId.putIfAbsent(q.id(), q);
         }
 
-        static StepOutcome of(List<Map<String, Object>> rows) {
-            return new StepOutcome(false, rows != null ? rows : List.of());
+        Map<String, Map<String, SkillSpec.BindSource>> wiring = new LinkedHashMap<>();
+        for (SkillSpec.SpecQuery q : spec.queries()) {
+            wiring.putIfAbsent(q.id(), q.bindings());
         }
+
+        Map<String, List<Map<String, Object>>> results = new LinkedHashMap<>();
+        NeedsResolver.Resolution resolution;
+        while (true) {
+            NeedsResolver.Rows rows = rowsOf(results);
+            resolution = NeedsResolver.resolve(
+                    spec.needs(), rows, NeedsResolver.reachOf(wiring, rows));
+            boolean ran = false;
+            for (String id : resolution.wanted()) {
+                SkillSpec.SpecQuery q = byId.get(id);
+                if (q == null || results.containsKey(id)) {
+                    continue;
+                }
+                Map<String, Object> binds = bindsFor(q, args, results);
+                if (binds == null) {
+                    continue; // 아직 못 푼다 — 다음 바퀴에 앞 조달이 와 있을 수 있다.
+                }
+                List<Map<String, Object>> fetched = query.query(q.sql(), binds);
+                results.put(id, fetched != null ? fetched : List.of());
+                ran = true;
+            }
+            if (!ran) {
+                break;
+            }
+        }
+        return buildResult(spec, results, resolution);
     }
 
-    private static ToolResult runSkill(SkillSpec spec, SkillQuery query, Map<String, Object> args) {
-        List<StepOutcome> outcomes = new ArrayList<>();
-        List<List<Map<String, Object>>> stepRows = new ArrayList<>();
+    /** 판정기가 실행 결과를 읽는 창구 — 안 돈 조달은 미도착({@code null})이다. */
+    private static NeedsResolver.Rows rowsOf(Map<String, List<Map<String, Object>>> results) {
+        return (queryId, column) -> {
+            List<Map<String, Object>> rows = results.get(queryId);
+            if (rows == null) {
+                return null;
+            }
+            return NeedsResolver.Cell.of(valuesOf(rows, column));
+        };
+    }
 
-        for (int i = 0; i < spec.steps().size(); i++) {
-            SkillSpec.SkillStep step = spec.steps().get(i);
-            Map<String, SkillSpec.BindSource> bindSpec = step.binds() != null ? step.binds() : Map.of();
-            Map<String, Object> binds = new LinkedHashMap<>();
-            boolean missingBind = false;
-
-            for (Map.Entry<String, SkillSpec.BindSource> e : bindSpec.entrySet()) {
-                SkillSpec.BindSource src = e.getValue();
-                if ("arg".equals(src.from())) {
-                    // 인자 이름으로 조회 — 다중 인자 지원.
-                    Object raw = args.get(src.arg());
-                    String v = raw == null ? "" : String.valueOf(raw).trim();
-                    if (v.isEmpty()) {
-                        missingBind = true;
-                        break;
-                    }
-                    binds.put(e.getKey(), v);
-                } else {
-                    List<Map<String, Object>> prevRows =
-                            src.step() != null && src.step() < stepRows.size() ? stepRows.get(src.step()) : null;
-                    Object value = prevRows != null && !prevRows.isEmpty()
-                            ? prevRows.get(0).get(src.column())
-                            : null;
-                    if (value == null) {
-                        // 바인드 소스가 없음(직전 스텝 0행 등) → 이 스텝 스킵.
-                        missingBind = true;
-                        break;
-                    }
-                    binds.put(e.getKey(), value);
+    /** 한 컬럼의 값들(중복·공백 제거). 컬럼 이름은 대소문자를 가리지 않는다. */
+    private static List<String> valuesOf(List<Map<String, Object>> rows, String column) {
+        Set<String> values = new LinkedHashSet<>();
+        for (Map<String, Object> row : rows) {
+            for (Map.Entry<String, Object> cell : row.entrySet()) {
+                if (cell.getKey() != null && cell.getKey().trim().equalsIgnoreCase(column.trim())
+                        && cell.getValue() != null && !String.valueOf(cell.getValue()).isBlank()) {
+                    values.add(String.valueOf(cell.getValue()).trim());
                 }
             }
+        }
+        return List.copyOf(values);
+    }
 
-            if (missingBind) {
-                outcomes.add(StepOutcome.notRun());
-                stepRows.add(List.of());
+    /** 이 조달의 바인드 값 — 하나라도 못 채우면 null(이번 바퀴에는 못 돈다). */
+    private static Map<String, Object> bindsFor(SkillSpec.SpecQuery query,
+            Map<String, Object> args, Map<String, List<Map<String, Object>>> results) {
+        Map<String, Object> binds = new LinkedHashMap<>();
+        for (Map.Entry<String, SkillSpec.BindSource> e : query.bindings().entrySet()) {
+            SkillSpec.BindSource src = e.getValue();
+            if ("arg".equals(src.from())) {
+                Object raw = args.get(src.arg());
+                String value = raw == null ? "" : String.valueOf(raw).trim();
+                if (value.isEmpty()) {
+                    return null;
+                }
+                binds.put(e.getKey(), value);
                 continue;
             }
-            List<Map<String, Object>> rows = query.query(step.sql(), binds);
-            outcomes.add(StepOutcome.of(rows));
-            stepRows.add(rows != null ? rows : List.of());
+            List<Map<String, Object>> rows = results.get(src.query());
+            if (rows == null || rows.isEmpty()) {
+                return null;
+            }
+            List<String> values = valuesOf(rows, src.column());
+            // 갈림길은 고르지 않는다 — 하나로 정해질 때만 이어간다(BE #50).
+            if (values.size() != 1) {
+                return null;
+            }
+            binds.put(e.getKey(), values.get(0));
         }
-
-        return buildResult(spec, outcomes);
+        return binds;
     }
 
     /**
-     * 조회 사실 + 출력 지침(프로즈)을 LLM 서술용으로 조립 + 표.
+     * 조회 사실 + 판정 + 출력 지침(프로즈)을 LLM 서술용으로 조립 + 표.
      *
-     * <p>v2: 형식은 강제하지 않고 <b>내용에만 바닥</b>을 둔다 — 서술 지시 +
-     * 반드시 포함({@code steps[].produces}) + 하지 말 것 + 예시. 값 의미(코드표)는
-     * 스킬에 없다: 표준 db-schema 문서 fetch 경로는 후속 과제(foundry 설계 §13).
+     * <p>v3: <b>반드시 포함</b>이 조회 산출물이 아니라 채워진 need 다. 못 채운 것도
+     * 같이 싣는다 — 비어 있다는 사실을 알려 주지 않으면 모델은 그 자리를 그럴듯하게
+     * 메운다. 값 의미(코드표)는 스킬에 없다: 표준 db-schema 문서 fetch 경로는
+     * 후속 과제(foundry 설계 §13).
      */
-    private static ToolResult buildResult(SkillSpec spec, List<StepOutcome> outcomes) {
-        List<String> parts = new ArrayList<>();
-        parts.add("[조회 결과]");
-        for (int i = 0; i < spec.steps().size(); i++) {
-            StepOutcome outcome = i < outcomes.size() ? outcomes.get(i) : StepOutcome.notRun();
-            parts.add("- " + spec.steps().get(i).title() + ": " + describe(outcome));
+    private static ToolResult buildResult(SkillSpec spec,
+            Map<String, List<Map<String, Object>>> results, NeedsResolver.Resolution resolution) {
+        Set<String> wantedButUnrun = new LinkedHashSet<>();
+        for (SkillSpec.SkillNeed need : spec.needs()) {
+            NeedsResolver.NeedStatus status = statusOf(resolution, need.id());
+            if (status == null || status.state() == NeedsResolver.State.INACTIVE
+                    || status.state() == NeedsResolver.State.FILLED) {
+                continue;
+            }
+            for (SkillSpec.Fill fill : need.fills()) {
+                if (!results.containsKey(fill.query())) {
+                    wantedButUnrun.add(fill.query());
+                }
+            }
         }
 
-        String particle = hasFinalConsonant(spec.focus()) ? "을" : "를";
-        parts.add("[출력 지침]");
-        parts.add("조회한 데이터로 " + spec.scope().단위() + "의 " + spec.focus() + particle
-                + " 설명한다. 정해진 형식은 없다.");
-        parts.add("체계적·논리적으로, 없는 정보는 지어내지 않는다.");
+        List<String> parts = new ArrayList<>();
+        parts.add("[조회 결과]");
+        for (SkillSpec.SpecQuery query : spec.queries()) {
+            parts.add("- " + query.id() + ": " + describe(query.id(), results, wantedButUnrun));
+        }
 
-        List<String> produces = spec.steps().stream()
-                .map(SkillSpec.SkillStep::produces)
-                .filter(p -> p != null && !p.isBlank())
-                .toList();
-        if (!produces.isEmpty()) {
-            parts.add("반드시 포함 (질문이 특정 항목만 묻는 게 아니면): " + String.join(" · ", produces));
+        List<String> met = whats(resolution.in(NeedsResolver.State.FILLED));
+        if (!met.isEmpty()) {
+            parts.add("[알아낸 것]");
+            for (String what : met) {
+                parts.add("- " + what);
+            }
+        }
+        List<String> unmet = whats(resolution.unmet());
+        if (!unmet.isEmpty()) {
+            parts.add("[확인되지 않은 것 — 지어내지 말고 확인되지 않았다고 적는다]");
+            for (String what : unmet) {
+                parts.add("- " + what);
+            }
+        }
+
+        parts.add("[출력 지침]");
+        parts.add("조회한 데이터로 다음 질문에 답한다: " + spec.rephrasing());
+        parts.add("정해진 형식은 없다. 체계적·논리적으로, 없는 정보는 지어내지 않는다.");
+        if (!met.isEmpty()) {
+            parts.add("반드시 포함 (질문이 특정 항목만 묻는 게 아니면): " + String.join(" · ", met));
         }
 
         parts.add("[하지 말 것]");
@@ -250,22 +403,44 @@ public final class SkillLoader {
         }
 
         List<ChatTable> tables = new ArrayList<>();
-        for (int i = 0; i < spec.steps().size(); i++) {
-            List<Map<String, Object>> rows = i < outcomes.size() ? outcomes.get(i).rows() : List.of();
-            if (!rows.isEmpty()) {
-                tables.add(rowsToTable(spec.steps().get(i).title(), rows));
+        for (SkillSpec.SpecQuery query : spec.queries()) {
+            List<Map<String, Object>> rows = results.get(query.id());
+            if (rows != null && !rows.isEmpty()) {
+                tables.add(rowsToTable(query.id(), rows));
             }
         }
-
         return new ToolResult(String.join("\n", parts), tables.isEmpty() ? null : tables);
     }
 
-    /** 없음의 두 종류를 갈라 적는다 — 조회한 0행인가, 조회하지 못한 것인가. */
-    private static String describe(StepOutcome outcome) {
-        if (outcome.skipped()) {
-            return "(앞 단계 결과가 없어 조회하지 않음 — 데이터가 없다는 뜻이 아니다)";
+    private static NeedsResolver.NeedStatus statusOf(
+            NeedsResolver.Resolution resolution, String needId) {
+        return resolution.needs().stream()
+                .filter(n -> n.id().equals(needId))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private static List<String> whats(List<NeedsResolver.NeedStatus> needs) {
+        return needs.stream()
+                .map(NeedsResolver.NeedStatus::what)
+                .filter(w -> w != null && !w.isBlank())
+                .toList();
+    }
+
+    /**
+     * 없음의 <b>세 종류</b>를 갈라 적는다 — 조회한 0행인가, 필요했는데 못 돌린
+     * 것인가, 이번 질문에 필요하지 않아 안 돈 것인가. 뭉개면 모델은 안 돈 조회를
+     * "그 데이터는 없다"로 단정한다.
+     */
+    private static String describe(String queryId,
+            Map<String, List<Map<String, Object>>> results, Set<String> wantedButUnrun) {
+        List<Map<String, Object>> rows = results.get(queryId);
+        if (rows == null) {
+            return wantedButUnrun.contains(queryId)
+                    ? "(앞 조달 결과가 없어 조회하지 못함 — 데이터가 없다는 뜻이 아니다)"
+                    : "(이번 질문에는 필요하지 않아 조회하지 않음)";
         }
-        return outcome.rows().isEmpty() ? "(조회 결과 0행)" : stringify(outcome.rows());
+        return rows.isEmpty() ? "(조회 결과 0행)" : stringify(rows);
     }
 
     private static ChatTable rowsToTable(String title, List<Map<String, Object>> rows) {

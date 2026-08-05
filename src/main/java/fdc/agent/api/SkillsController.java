@@ -1,6 +1,7 @@
 package fdc.agent.api;
 
 import fdc.agent.contract.SkillCatalog;
+import fdc.agent.skills.QueryPool;
 import fdc.agent.skills.SkillLoader;
 import fdc.agent.skills.SkillSource;
 import fdc.agent.skills.SkillSpec;
@@ -29,34 +30,47 @@ public class SkillsController {
 
     @GetMapping("/api/fdc/v1/skills")
     public SkillCatalog skills() {
-        return new SkillCatalog(skillSource.specs().stream().map(SkillsController::toEntry).toList());
+        List<SkillSpec> specs = skillSource.specs();
+        QueryPool pool = QueryPool.of(specs);
+        return new SkillCatalog(specs.stream().map(spec -> toEntry(spec, pool)).toList());
     }
 
-    private static SkillCatalog.Entry toEntry(SkillSpec spec) {
+    private static SkillCatalog.Entry toEntry(SkillSpec spec, QueryPool pool) {
         List<SkillCatalog.Input> inputs = spec.inputs().stream()
                 .map(in -> new SkillCatalog.Input(in.name(), in.required(), in.description()))
                 .toList();
 
-        List<SkillCatalog.Step> steps = new ArrayList<>();
-        for (SkillSpec.SkillStep step : spec.steps()) {
-            Map<String, SkillSpec.BindSource> binds =
-                    step.binds() != null ? step.binds() : Map.of();
+        List<SkillCatalog.Need> needs = spec.needs().stream()
+                .map(need -> new SkillCatalog.Need(need.id(), need.what(), need.when(),
+                        need.fills().stream()
+                                .map(f -> new SkillCatalog.Fill(f.query(), f.column()))
+                                .toList()))
+                .toList();
+
+        List<SkillCatalog.Query> queries = new ArrayList<>();
+        for (SkillSpec.SpecQuery query : spec.queries()) {
             Map<String, String> argBinds = new LinkedHashMap<>();
-            List<String> priorStepBinds = new ArrayList<>();
+            List<String> priorQueryBinds = new ArrayList<>();
             Map<String, SkillCatalog.Bind> wiring = new LinkedHashMap<>();
-            for (Map.Entry<String, SkillSpec.BindSource> e : binds.entrySet()) {
+            for (Map.Entry<String, SkillSpec.BindSource> e : query.bindings().entrySet()) {
                 SkillSpec.BindSource src = e.getValue();
                 if ("arg".equals(src.from())) {
                     argBinds.put(e.getKey(), src.arg());
                     wiring.put(e.getKey(), new SkillCatalog.Bind("arg", src.arg(), null, null));
                 } else {
-                    priorStepBinds.add(e.getKey());
+                    priorQueryBinds.add(e.getKey());
                     wiring.put(e.getKey(),
-                            new SkillCatalog.Bind("step", null, src.step(), src.column()));
+                            new SkillCatalog.Bind("query", null, src.query(), src.column()));
                 }
             }
-            steps.add(new SkillCatalog.Step(
-                    step.title(), step.produces(), step.sql(), argBinds, priorStepBinds,
+            QueryPool.Query pooled = pool.byId(spec.name() + "#" + query.id());
+            queries.add(new SkillCatalog.Query(
+                    query.id(),
+                    pooled != null ? pooled.label() : query.id(),
+                    pooled != null ? pooled.table() : query.table(),
+                    query.sql(),
+                    argBinds,
+                    priorQueryBinds,
                     wiring));
         }
 
@@ -64,12 +78,13 @@ public class SkillsController {
                 // 툴 이름과 같은 규칙 — 입력 회신 inputs[skill][key] 가 여기에 맞물린다.
                 spec.name().replace("-", "_"),
                 spec.name(),
-                spec.scope().단위(),
-                spec.focus(),
                 SkillLoader.synthesizeDescription(spec),
+                spec.questions(),
+                spec.rephrasing(),
                 spec.argumentHint(),
                 spec.anchorTable(),
                 inputs,
-                steps);
+                needs,
+                queries);
     }
 }

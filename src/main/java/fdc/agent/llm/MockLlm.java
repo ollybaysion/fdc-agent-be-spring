@@ -11,6 +11,7 @@ import fdc.agent.llm.LlmTypes.LlmMessage;
 import fdc.agent.llm.LlmTypes.LlmToolCall;
 import fdc.agent.llm.LlmTypes.LlmToolSpec;
 import fdc.agent.llm.LlmTypes.LlmTurn;
+import fdc.agent.skills.QueryPool;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -40,9 +41,9 @@ public class MockLlm implements LlmClient {
     // 사용자가 "직접 실행할 SQL 을 달라"고 말한 신호 — 조달 요청의 시작.
     private static final Pattern WANTS_SQL =
             Pattern.compile("SQL|쿼리\\s*(줘|주세요|요청)|조달|요청\\s*카드", Pattern.CASE_INSENSITIVE);
-    // request_data 툴 설명에 실린 풀 목록 한 줄 — "- id — 제목 (인자: a, b)".
+    // request_data 툴 설명에 실린 풀 목록 한 줄 — "- id — 라벨 (인자: a, b) ※ …".
     private static final Pattern CATALOG_LINE =
-            Pattern.compile("(?m)^- (\\S+) — .*?\\(인자: ([^)]*)\\)");
+            Pattern.compile("(?m)^- (\\S+) — .*?\\(인자: ([^)]*)\\)(.*)$");
     // 붙여넣은 데이터를 조회하겠다는 신호 — 원 질문에서만 찾는다.
     // "등록 완료"는 요청 카드를 채운 뒤의 이어가기 발화 — 적재된 표를 조회해 근거로 답한다.
     private static final Pattern WANTS_SNAPSHOT_QUERY =
@@ -63,11 +64,11 @@ public class MockLlm implements LlmClient {
         if (question.contains("후속 질문 3개")) {
             return new LlmTurn.Final(followupSuggestions(messages));
         }
-        // 종결 서술 지시(/chat/data) — 실 모델이 해석·결론을 쓸 자리를 목은 맥락
-        // 섹션(# 데이터)의 블록 헤딩을 결정적으로 되읽어 흉내낸다. 제한망 1차 배포가
-        // 바로 이 경로다(#38 T6). 감지는 문장이 아니라 지시 상수에 붙는다.
+        // 종결 서술 지시(/chat/data) — 실 모델이 해석·결론을 쓸 자리를 목은 판정 턴을
+        // 결정적으로 되읽어 흉내낸다. 제한망 1차 배포가 바로 이 경로다(#38 T6).
+        // 감지는 문장이 아니라 지시 상수에 붙는다.
         if (question.contains(NarrationPrompt.NARRATE_INSTRUCTION)) {
-            return new LlmTurn.Final(narration(contextSection(messages)));
+            return new LlmTurn.Final(narration(lastAssistantText(messages)));
         }
         LlmToolCall call = planCall(question, contextSection(messages), tools);
         if (call != null) {
@@ -82,6 +83,17 @@ public class MockLlm implements LlmClient {
             LlmMessage m = messages.get(i);
             if (m.role() == Role.USER) {
                 return m.content() != null ? m.content() : "";
+            }
+        }
+        return "";
+    }
+
+    /** 마지막 assistant 발화 — 종결 서술 경로에서는 판정 턴이다. 없으면 빈 문자열. */
+    private static String lastAssistantText(List<LlmMessage> messages) {
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            LlmMessage m = messages.get(i);
+            if (m.role() == Role.ASSISTANT && m.content() != null && !m.content().isBlank()) {
+                return m.content();
             }
         }
         return "";
@@ -178,8 +190,12 @@ public class MockLlm implements LlmClient {
     }
 
     /**
-     * 풀에서 <b>주어진 인자만으로 부를 수 있는 첫 단계</b>의 queryId. 목록은 request_data
-     * 툴 스펙의 queryId 설명에 실려 오므로, 목은 스킬 이름을 하나도 알 필요가 없다.
+     * 풀에서 <b>주어진 인자만으로 지금 부를 수 있는 첫 조달</b>의 queryId. 목록은
+     * request_data 툴 스펙의 queryId 설명에 실려 오므로, 목은 스킬 이름을 하나도
+     * 알 필요가 없다.
+     *
+     * <p>"지금 부를 수 있나"는 의존 표시의 부재로 읽는다 — spec v3 의 조달 목록은
+     * 카탈로그라 순서가 없고, 따라서 "첫 단계"라는 자리도 없다.
      */
     private static String firstPoolStep(List<LlmToolSpec> tools, String... argNames) {
         Matcher line = CATALOG_LINE.matcher(queryIdDescription(tools));
@@ -189,7 +205,7 @@ public class MockLlm implements LlmClient {
                     .map(String::trim)
                     .filter(s -> !s.isEmpty())
                     .toList();
-            if (args.equals(wanted) && line.group(1).endsWith("#0")) {
+            if (args.equals(wanted) && !line.group(3).contains(QueryPool.DEPENDS_MARK)) {
                 return line.group(1);
             }
         }
@@ -249,18 +265,15 @@ public class MockLlm implements LlmClient {
         return "[\"S-0004 조회 SQL 로 요청해줘\", \"CVD-01 측정 분석해줘\", \"이 데이터로 정리해줘\"]";
     }
 
-    /** 맥락 섹션에서 질의 대상·데이터 블록 헤딩만 되읽어 결정적 종결 서술을 만든다. */
-    private static String narration(String context) {
-        // 답변 가이드 절의 불릿(반드시 포함·하지 말 것)은 지시이지 데이터가 아니다 —
-        // 되읽으면 목 서술이 지시문을 읊게 되므로 그 앞까지만 본다.
-        int guideAt = context.indexOf(NarrationPrompt.SECTION_GUIDE);
-        String visible = guideAt >= 0 ? context.substring(0, guideAt) : context;
-        List<String> lines = visible.lines()
-                .filter(l -> l.startsWith("## ") || l.startsWith("- "))
-                .toList();
+    /**
+     * 판정 턴({@link NarrationPrompt} 의 마지막 assistant)을 되읽어 결정적 종결
+     * 서술을 만든다 — 목은 해석을 못 하니 결정론 관찰을 그대로 옮긴다. 도착 데이터
+     * 자체는 tool 메시지에 있고 목이 그걸 요약할 방법은 없다.
+     */
+    private static String narration(String verdict) {
+        List<String> lines = verdict.lines().filter(l -> l.startsWith("- ")).toList();
         return "요청하신 조회 절차가 완료됐습니다.\n" + String.join("\n", lines)
-                + "\n\n위 결과가 도착한 데이터의 전부입니다 — 값 전문은 데이터 패널에서 확인하세요. "
-                + "(온프렘 LLM 미설정 시 mock 서술)";
+                + "\n\n값 전문은 데이터 패널에서 확인하세요. (온프렘 LLM 미설정 시 mock 서술)";
     }
 
     private static String genericAnswer(String text) {
