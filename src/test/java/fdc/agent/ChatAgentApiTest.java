@@ -52,7 +52,7 @@ class ChatAgentApiTest {
         assertThat(done.has("tables")).isFalse();
 
         JsonNode req = done.path("dataRequests").get(0);
-        assertThat(req.path("queryKey").asText()).isEqualTo("fdc-explain-sensor#0__snsr_id=S-0004");
+        assertThat(req.path("queryKey").asText()).isEqualTo("fdc-explain-sensor#sensor_row__snsr_id=S-0004");
         assertThat(req.path("sql").asText())
                 .contains("FROM fdc_sensor").contains("snsr_id = 'S-0004'").doesNotContain(":id");
 
@@ -69,7 +69,7 @@ class ChatAgentApiTest {
         String body = """
                 {"messages":[{"role":"user","content":"등록 완료"}],
                  "dataSnapshots":[
-                   {"queryKey":"fdc-explain-sensor#0__snsr_id=S-0004","label":"1단계 — 센서 기본 정보",
+                   {"queryKey":"fdc-explain-sensor#sensor_row__snsr_id=S-0004","label":"1단계 — 센서 기본 정보",
                     "capturedAt":"2026-07-28T00:00","columns":["SNSR_ID","EQP_ID"],"rowCount":1,
                     "rows":[["S-0004","CVD-01"]]}
                  ]}
@@ -81,7 +81,7 @@ class ChatAgentApiTest {
         assertThat(done).isNotNull();
 
         JsonNode req = done.path("dataRequests").get(0);
-        assertThat(req.path("queryKey").asText()).isEqualTo("fdc-explain-sensor#1__snsr_id=S-0004");
+        assertThat(req.path("queryKey").asText()).isEqualTo("fdc-explain-sensor#equipment_row__snsr_id=S-0004");
         assertThat(req.path("sql").asText()).contains("eqp_id = 'CVD-01'");
     }
 
@@ -91,7 +91,7 @@ class ChatAgentApiTest {
         String body = """
                 {"messages":[{"role":"user","content":"등록 완료"}],
                  "dataSnapshots":[
-                   {"queryKey":"fdc-explain-sensor#0__snsr_id=S-9999","label":"1단계 — 센서 기본 정보",
+                   {"queryKey":"fdc-explain-sensor#sensor_row__snsr_id=S-9999","label":"1단계 — 센서 기본 정보",
                     "capturedAt":"2026-07-28T00:00","columns":["SNSR_ID","EQP_ID"],"rowCount":0,
                     "rows":[]}
                  ]}
@@ -149,13 +149,13 @@ class ChatAgentApiTest {
         String body = """
                 {"messages":[{"role":"user","content":"등록 완료"}],
                  "dataSnapshots":[
-                   {"queryKey":"fdc-explain-sensor#0__snsr_id=S-0004","label":"1단계",
+                   {"queryKey":"fdc-explain-sensor#sensor_row__snsr_id=S-0004","label":"1단계",
                     "capturedAt":"2026-07-28T00:00","columns":["SNSR_ID","EQP_ID"],"rowCount":1,
                     "rows":[["S-0004","CVD-01"]]},
-                   {"queryKey":"fdc-explain-sensor#1__snsr_id=S-0004","label":"2단계",
+                   {"queryKey":"fdc-explain-sensor#equipment_row__snsr_id=S-0004","label":"2단계",
                     "capturedAt":"2026-07-28T00:01","columns":["EQP_ID","EQP_NAME"],"rowCount":1,
                     "rows":[["CVD-01","증착기 1호"]]},
-                   {"queryKey":"fdc-explain-sensor#2__snsr_id=S-0004","label":"3단계",
+                   {"queryKey":"fdc-explain-sensor#setup_event_rows__snsr_id=S-0004","label":"3단계",
                     "capturedAt":"2026-07-28T00:02","columns":["D","EVT_LABEL"],"rowCount":1,
                     "rows":[["2026-05-11","라인 점검"]]}
                  ]}

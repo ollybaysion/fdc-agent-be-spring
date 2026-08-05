@@ -147,11 +147,9 @@ class OpenAiLlmTest {
         assertThat(result.finishReason()).isEqualTo(FinishReason.STOP);
         assertThat(result.text()).contains("S-0004");
 
-        // 스킬 스텝이 낸 표가 그대로 실려 온다(센서 → 소속 설비 → 최근 이벤트).
+        // 스킬 조달이 낸 표가 그대로 실려 온다(센서 → 소속 설비 → 최근 이벤트).
         List<String> titles = result.tables().stream().map(t -> t.title()).toList();
-        assertThat(titles).isNotEmpty();
-        assertThat(titles.stream().anyMatch(t -> t.contains("센서"))).isTrue();
-        assertThat(titles.stream().anyMatch(t -> t.contains("설비"))).isTrue();
+        assertThat(titles).contains("sensor_row", "equipment_row");
         assertThat(result.tables().get(0).rows().get(0)).containsEntry("SNSR_ID", "S-0004");
     }
 }

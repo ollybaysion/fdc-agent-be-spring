@@ -9,8 +9,8 @@ import java.util.Map;
 import java.util.function.Function;
 
 /**
- * 조회 스텝의 SQL 에 박을 값들을 해석한다 — {@code from:"arg"} 는 인자에서,
- * {@code from:"step"} 은 <b>도착한 앞 단계 스냅샷에서</b>. 값 추출·pick 검증의
+ * 조달 수단의 SQL 에 박을 값들을 해석한다 — {@code from:"arg"} 는 인자에서,
+ * {@code from:"query"} 는 <b>도착한 다른 조달의 스냅샷에서</b>. 값 추출·pick 검증의
  * 결정론 코어이고, 채팅 경로({@link DataRequestTool})와 패널 판정 경로
  * ({@link PanelJudge})가 이 한 곳을 공유한다(#38 T13) — 두 경로의 진행 판정이
  * 서로 다른 해석으로 갈라지면 안 된다.
@@ -44,38 +44,38 @@ public final class BindResolver {
                 binds.put(e.getKey(), value);
                 continue;
             }
-            BindOutcome step = fromEarlierStep(e.getKey(), query, runArgs, givenPick, src, arrived);
-            if (!(step instanceof BindOutcome.Ready ready)) {
-                return step;
+            BindOutcome upstream = fromOtherQuery(e.getKey(), query, runArgs, givenPick, src, arrived);
+            if (!(upstream instanceof BindOutcome.Ready ready)) {
+                return upstream;
             }
             binds.putAll(ready.binds());
         }
         return new BindOutcome.Ready(binds);
     }
 
-    /** 앞 단계 스냅샷에서 한 값을 고른다 — 1행이면 그대로, 여러 행이면 pick, 없으면 중단. */
-    private static BindOutcome fromEarlierStep(
+    /** 다른 조달의 스냅샷에서 한 값을 고른다 — 1행이면 그대로, 여러 행이면 pick, 없으면 중단. */
+    private static BindOutcome fromOtherQuery(
             String bindKey, QueryPool.Query query, Map<String, String> runArgs,
             Map<String, String> pick, SkillSpec.BindSource src,
             Function<String, ChatDataSnapshot> arrived) {
-        if (src.step() == null) {
+        if (src.query() == null || src.query().isBlank()) {
             // 로드 시 검증(SkillLoader.validateBinds)이 걸렀어야 할 spec — 조용히 이상한
             // 문장을 만드느니 여기서 멈춘다.
             return new BindOutcome.Blocked("이 조회의 배선이 온전하지 않아 요청할 수 없습니다.");
         }
-        int step = src.step();
-        String sourceKey = QueryKey.of(query.skill(), step, runArgs, query.requiredArgs());
-        ChatDataSnapshot source = arrived.apply(sourceKey);
-        if (source == null) {
-            return new BindOutcome.MissingUpstream(step, query.skill() + "#" + step);
+        String source = src.query();
+        String sourceKey = QueryKey.of(query.skill(), source, runArgs, query.requiredArgs());
+        ChatDataSnapshot arrivedRows = arrived.apply(sourceKey);
+        if (arrivedRows == null) {
+            return new BindOutcome.MissingUpstream(source, query.skill() + "#" + source);
         }
-        if (source.isEmptyResult()) {
-            return new BindOutcome.EmptyUpstream(step);
+        if (arrivedRows.isEmptyResult()) {
+            return new BindOutcome.EmptyUpstream(source);
         }
 
-        List<String> values = QueryProgress.valuesOf(source, src.column());
+        List<String> values = QueryProgress.valuesOf(arrivedRows, src.column());
         if (values.isEmpty()) {
-            return new BindOutcome.Blocked((step + 1) + "단계 결과에서 " + src.column()
+            return new BindOutcome.Blocked(source + " 결과에서 " + src.column()
                     + " 컬럼 값을 찾지 못했습니다 — 붙여넣은 표에 그 컬럼이 있는지 확인해 주세요.");
         }
 
@@ -96,10 +96,10 @@ public final class BindResolver {
                 }
             }
             return new BindOutcome.Blocked("pick 한 " + src.column() + "=" + picked
-                    + " 은 " + (step + 1) + "단계 결과에 없는 값입니다. " + candidates(values));
+                    + " 은 " + source + " 결과에 없는 값입니다. " + candidates(values));
         }
         if (values.size() > 1) {
-            return new BindOutcome.NeedPick(step, src.column(), values);
+            return new BindOutcome.NeedPick(source, src.column(), values);
         }
         return new BindOutcome.Ready(Map.of(bindKey, values.get(0)));
     }

@@ -55,6 +55,6 @@ class AnalysisTest {
                 new LlmTurn.Final("분석 결과입니다.")));
         AgentResult result = run(llm, "분석");
         assertThat(result.tables().stream()
-                .anyMatch(t -> t.title() != null && t.title().contains("구간 측정 집계"))).isTrue();
+                .anyMatch(t -> t.title() != null && t.title().equals("reading_stats"))).isTrue();
     }
 }

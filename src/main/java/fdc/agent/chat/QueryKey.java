@@ -11,14 +11,18 @@ import java.util.regex.Pattern;
  * 일치로도 흔들리지 않고, 무엇보다 <b>키 자체가 진행 상태를 들고 있다</b>.
  *
  * <pre>
- * fdc-explain-sensor#0__snsr_id=S-0004
- * └─ 스킬 ─────────┘ └단계┘ └─ run 이름표 ─┘
+ * fdc-explain-sensor#sensor_row__snsr_id=S-0004
+ * └─ 스킬 ─────────┘ └ 조달 id ┘ └─ run 이름표 ─┘
  * </pre>
  *
- * <p>run 이름표에는 그 단계가 실제로 쓰는 바인드가 아니라 <b>스킬의 필수 인자 전량</b>이
- * 들어간다. 그래야 한 절차의 모든 단계가 같은 이름표를 달고, 도착한 스냅샷만 보고
- * "이 절차는 몇 단계까지 왔나"가 유도된다 — 진행을 따로 저장할 필요가 없어진다.
- * (2단계의 바인드 {@code eqp} 는 1단계 결과에서 나오므로 이름표가 될 수 없다.)
+ * <p>가운데가 스텝 인덱스가 아니라 <b>조달 수단의 id</b> 다(spec v3). {@code queries[]}
+ * 는 카탈로그라 순서에 뜻이 없어져, 위치로 가리키면 목록 재배열만으로 남의 조회를
+ * 가리키게 된다.
+ *
+ * <p>run 이름표에는 그 조달이 실제로 쓰는 바인드가 아니라 <b>스킬의 필수 인자 전량</b>이
+ * 들어간다. 그래야 한 절차의 모든 조달이 같은 이름표를 달고, 도착한 스냅샷만 보고
+ * "이 절차는 무엇을 알아냈나"가 유도된다 — 진행을 따로 저장할 필요가 없어진다.
+ * (앞 조달 결과에서 오는 바인드는 이름표가 될 수 없다.)
  *
  * <p>구분자로 쓰는 {@code # & =} 는 값에서 {@code _} 로 접는다. 키 안에서만 그렇고
  * SQL 에는 원문이 간다. 진행 조회는 파싱이 아니라 <b>키를 다시 만들어 대조</b>하는
@@ -29,17 +33,23 @@ public final class QueryKey {
     }
 
     private static final Pattern KEY =
-            Pattern.compile("([A-Za-z0-9_.\\-]+)#(\\d{1,3})(?:__(.*))?");
+            Pattern.compile("([A-Za-z0-9_.\\-]+)#([A-Za-z][A-Za-z0-9_]*)(?:__(.*))?");
 
-    /** 키에서 읽어 낸 것 — 어느 스킬의 몇 번째 단계인가, 그리고 어느 run 인가. */
-    public record Parsed(String skill, int step, String argsPart) {
+    /** 키에서 읽어 낸 것 — 어느 스킬의 어느 조달인가, 그리고 어느 run 인가. */
+    public record Parsed(String skill, String query, String argsPart) {
+
+        /** 풀 주소({@code 스킬명#조달id}) — 인자 없는 정식 id. */
+        public String queryId() {
+            return skill + "#" + query;
+        }
     }
 
     /**
      * @param argNames 이름표에 넣을 인자 이름(정렬된 필수 인자). 값이 없는 이름은 건너뛴다.
      */
-    public static String of(String skill, int step, Map<String, String> args, List<String> argNames) {
-        StringBuilder key = new StringBuilder(skill).append('#').append(step);
+    public static String of(
+            String skill, String query, Map<String, String> args, List<String> argNames) {
+        StringBuilder key = new StringBuilder(skill).append('#').append(query);
         String part = argsPart(args, argNames);
         if (!part.isEmpty()) {
             key.append("__").append(part);
@@ -71,8 +81,7 @@ public final class QueryKey {
         if (!m.matches()) {
             return null;
         }
-        return new Parsed(m.group(1), Integer.parseInt(m.group(2)),
-                m.group(3) != null ? m.group(3) : "");
+        return new Parsed(m.group(1), m.group(2), m.group(3) != null ? m.group(3) : "");
     }
 
     /** 이름표를 다시 인자 맵으로 — 진행 섹션이 "이 인자로 이어 요청하라"를 적을 때 쓴다. */

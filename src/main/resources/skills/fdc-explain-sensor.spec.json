@@ -1,10 +1,13 @@
 {
   "name": "fdc-explain-sensor",
   "argumentHint": "{snsr_id}",
-  "scope": { "단위": "센서", "카디널리티": "단일", "의도": "상태" },
-  "focus": "정체·소속 설비·현재 상태",
   "anchorTable": "FDC_SENSOR",
-  "intro": "센서 하나의 기준 정보를 조회해 설명한다 — 종류·단위, 소속 설비, 활성/비활성 상태, 최근 설비 이벤트 맥락. 센서가 비활성이면 소속 설비의 미사용 여부까지 짚어 원인 단서를 준다.",
+  "questions": [
+    "S-0004 설명해줘",
+    "S-0004 어느 설비 거야?",
+    "S-0004 지금 쓰는 센서야?"
+  ],
+  "rephrasing": "센서 S-0004가 무엇을 재는 센서이고(종류·단위) 어느 설비에 속하며 지금 쓰이고 있는지, 안 쓰이고 있다면 소속 설비 자체가 미사용인지, 그리고 그 설비에 최근 어떤 정비 이벤트가 있었는지.",
   "inputs": [
     {
       "name": "snsr_id",
@@ -19,34 +22,70 @@
       "why": "센서·설비·이벤트 조회"
     }
   ],
-  "steps": [
+  "needs": [
     {
-      "title": "1단계 — 센서 기본 정보",
+      "id": "measure_kind",
+      "what": "무엇을 재는 센서인지",
+      "filledBy": [{ "query": "sensor_row", "column": "SNSR_TYPE_CD" }]
+    },
+    {
+      "id": "measure_unit",
+      "what": "측정 단위",
+      "filledBy": [{ "query": "sensor_row", "column": "UNIT_CD" }]
+    },
+    {
+      "id": "sensor_active",
+      "what": "센서가 지금 쓰이고 있는지",
+      "filledBy": [{ "query": "sensor_row", "column": "USE_YN" }]
+    },
+    {
+      "id": "owner_equipment",
+      "what": "소속 설비",
+      "filledBy": [{ "query": "sensor_row", "column": "EQP_ID" }]
+    },
+    {
+      "id": "equipment_identity",
+      "what": "그 설비의 이름과 모델",
+      "filledBy": [{ "query": "equipment_row", "column": "EQP_NAME" }]
+    },
+    {
+      "id": "equipment_active",
+      "what": "설비 자체가 미사용인지 — 센서 비활성의 단서",
+      "when": "sensor_active = N",
+      "filledBy": [{ "query": "equipment_row", "column": "USE_YN" }]
+    },
+    {
+      "id": "recent_events",
+      "what": "그 설비의 최근 정비 이벤트",
+      "filledBy": [{ "query": "setup_event_rows", "column": "EVT_LABEL" }]
+    }
+  ],
+  "queries": [
+    {
+      "id": "sensor_row",
+      "kind": "sql",
       "table": "fdc_sensor",
-      "produces": "센서 정체·상태",
       "sql": "SELECT snsr_id, eqp_id, snsr_type_cd, unit_cd, use_yn\n  FROM fdc_sensor WHERE snsr_id = :id",
       "binds": { "id": { "from": "arg", "arg": "snsr_id" } },
-      "branches": [
-        {
-          "when": "rows = 0",
-          "then": "종료하고 \"센서 {id}는 등록되어 있지 않다\"로 답한다"
-        }
-      ]
+      "notes": "이 조회가 0행이면 그 아래 needs 가 전부 못 차고, 그것이 곧 \"등록되어 있지 않다\"는 답이다."
     },
     {
-      "title": "2단계 — 소속 설비",
+      "id": "equipment_row",
+      "kind": "sql",
       "table": "fdc_equipment",
-      "produces": "소속 설비",
-      "lead": "1단계의 `EQP_ID`로:",
       "sql": "SELECT eqp_id, eqp_name, model_cd, vendor, use_yn\n  FROM fdc_equipment WHERE eqp_id = :eqp",
-      "binds": { "eqp": { "from": "step", "step": 0, "column": "EQP_ID" } }
+      "binds": {
+        "eqp": { "from": "query", "query": "sensor_row", "column": "EQP_ID" }
+      }
     },
     {
-      "title": "3단계 — 설비 최근 이벤트 (정비 맥락)",
+      "id": "setup_event_rows",
+      "kind": "sql",
       "table": "fdc_setup_event",
-      "produces": "최근 설비 이벤트",
       "sql": "SELECT TO_CHAR(evt_time, 'YYYY-MM-DD') AS d, evt_type_cd, evt_label\n  FROM fdc_setup_event WHERE eqp_id = :eqp\n ORDER BY evt_time DESC FETCH FIRST 3 ROWS ONLY",
-      "binds": { "eqp": { "from": "step", "step": 0, "column": "EQP_ID" } },
+      "binds": {
+        "eqp": { "from": "query", "query": "sensor_row", "column": "EQP_ID" }
+      },
       "notes": "`EVT_TYPE_CD`의 코드→뜻 번역은 표준 db-schema 문서를 따른다."
     }
   ],

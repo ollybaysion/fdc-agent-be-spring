@@ -7,6 +7,7 @@ import fdc.agent.contract.QueryScope;
 import fdc.agent.contract.RunDecl;
 import fdc.agent.contract.RunProgress;
 import fdc.agent.contract.SnapshotIndexEntry;
+import fdc.agent.skills.NeedsResolver;
 import fdc.agent.skills.QueryPool;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -19,6 +20,11 @@ import java.util.Map;
  * 인지한다. <b>요청 카드는 여기서 만들지 않는다</b> — 카드 배치·SQL 완성은 FE 가
  * 카탈로그(binds 포함)로 로컬 판정한다(demo-fe dataList, #169). 이 왕복의 용도는
  * BE 인지와 종결 서술 전이다.
+ *
+ * <p>판정의 기준이 spec v3 에서 바뀌었다: <b>"조회가 다 왔나"에서 "알아야 할 걸 다
+ * 알았나"로</b>. 전자는 도착한 행 수로 답할 수 있어서 v2 가 그렇게 했지만, 그건
+ * 조회의 상태이지 질문의 상태가 아니다. 실제 판정은 {@link NeedsResolver} 가 하고
+ * 여기서는 도착 데이터를 그 판정기가 읽을 수 있게 대어 준다.
  *
  * <p><b>무상태 순수함수다.</b> 판정 입력 = 도착 스냅샷 요약({@code snapshotIndex},
  * 체크된 것만 — T4) ∪ 명시된 절차 선언({@code runs[]} — T3). 서버는 아무것도
@@ -49,18 +55,23 @@ public final class PanelJudge {
     }
 
     /**
-     * 종결 서술 지시 — run 정체와 도착 실물 전부. 판정기는 <b>무엇이 도착해 절차가
-     * 끝났는가</b>만 내놓고, 문장(맥락 섹션) 합성은 {@link NarrationPrompt} 소관이다.
+     * 종결 서술 지시 — run 정체와 도착 실물 전부, 그리고 <b>무엇을 알아냈고 무엇이
+     * 못 채워진 채 끝났는가</b>({@code resolution}). 판정기는 여기까지만 내놓고
+     * 문장(맥락 섹션) 합성은 {@link NarrationPrompt} 소관이다.
      */
     public record Narration(
-            String runLabel, String skill, Map<String, String> args, List<StepArrival> steps) {
+            String runLabel,
+            String skill,
+            Map<String, String> args,
+            List<QueryArrival> arrivals,
+            NeedsResolver.Resolution resolution) {
     }
 
     /**
-     * 도착한 스텝 하나 — 판정 집합의 요약({@code hit})과 행 실물({@code full}).
+     * 도착한 조달 하나 — 판정 집합의 요약({@code hit})과 행 실물({@code full}).
      * {@code full} 은 0행이거나 이 요청에 rows 가 안 실렸으면 null 일 수 있다.
      */
-    public record StepArrival(
+    public record QueryArrival(
             QueryPool.Query query, SnapshotIndexEntry hit, ChatDataSnapshot full) {
     }
 
@@ -80,7 +91,7 @@ public final class PanelJudge {
         List<RunProgress> runsProgress = new ArrayList<>();
         List<String> terminalRuns = new ArrayList<>();
         for (RunSlot slot : slots) {
-            RunProgress progress = judgeRun(pool, slot, index);
+            RunProgress progress = judgeRun(pool, slot, index, rows);
             runsProgress.add(progress);
             if (progress.terminal()) {
                 terminalRuns.add(progress.label());
@@ -177,28 +188,25 @@ public final class PanelJudge {
             if (decl == null || decl.skill() == null || decl.skill().isBlank()) {
                 continue;
             }
-            QueryPool.Query first = pool.byId(decl.skill().trim());
+            String skill = decl.skill().trim();
             Map<String, String> args = decl.args() != null ? decl.args() : Map.of();
-            if (first == null) {
+            if (!pool.knows(skill)) {
                 // 등재되지 않은 스킬 — 무음으로 버리지 않고 보고 대상으로 남긴다.
-                slots.putIfAbsent("?" + decl.skill().trim(),
-                        new RunSlot(decl.skill().trim(), QueryKey.argsPart(args, List.copyOf(args.keySet())),
-                                args));
+                slots.putIfAbsent("?" + skill,
+                        new RunSlot(skill, QueryKey.argsPart(args, List.copyOf(args.keySet())), args));
                 continue;
             }
-            String argsPart = QueryKey.argsPart(args, first.requiredArgs());
-            slots.putIfAbsent(first.skill() + " " + argsPart,
-                    new RunSlot(first.skill(), argsPart, args));
+            String argsPart = QueryKey.argsPart(args, pool.requiredArgsOf(skill));
+            slots.putIfAbsent(skill + " " + argsPart, new RunSlot(skill, argsPart, args));
         }
 
         for (String key : index.keySet()) {
             QueryKey.Parsed parsed = QueryKey.parse(key);
-            QueryPool.Query query =
-                    parsed == null ? null : pool.byId(parsed.skill() + "#" + parsed.step());
+            QueryPool.Query query = parsed == null ? null : pool.byId(parsed.queryId());
             if (query == null) {
                 continue; // 풀 밖 키(자유 저작 스냅샷) — 진행으로 읽지 않는다.
             }
-            slots.putIfAbsent(query.skill() + " " + parsed.argsPart(),
+            slots.putIfAbsent(query.skill() + " " + parsed.argsPart(),
                     new RunSlot(query.skill(), parsed.argsPart(),
                             QueryKey.parseArgs(parsed.argsPart())));
         }
@@ -208,37 +216,87 @@ public final class PanelJudge {
     // ── run 하나의 판정 ──────────────────────────────────────────────────────
 
     private static RunProgress judgeRun(
-            QueryPool pool, RunSlot slot, Map<String, SnapshotIndexEntry> index) {
-        List<QueryPool.Query> steps = pool.stepsOf(slot.skill());
+            QueryPool pool, RunSlot slot,
+            Map<String, SnapshotIndexEntry> index, Map<String, ChatDataSnapshot> rows) {
         String label = label(slot);
-        if (steps.isEmpty()) {
-            return new RunProgress(slot.skill(), slot.args(), label, 0, 0, -1, false, null,
+        if (!pool.knows(slot.skill())) {
+            return new RunProgress(slot.skill(), slot.args(), label, 0, 0, List.of(), false,
+                    "UNKNOWN_SKILL", List.of(),
                     List.of(new RunProgress.StepHold(slot.skill(), "등재되지 않은 스킬입니다.")));
         }
 
-        int arrivedCount = 0;
-        int nextStep = -1;
-        Integer emptyAt = null;
-        for (QueryPool.Query q : steps) {
-            SnapshotIndexEntry hit = index.get(stepKey(slot, q));
-            boolean arrived = hit != null && hit.arrived();
-            if (arrived) {
-                arrivedCount++;
-                if (emptyAt == null && hit.isEmptyResult()) {
-                    emptyAt = q.step();
-                }
-            } else if (nextStep < 0) {
-                nextStep = q.step();
-            }
-        }
-        boolean terminal = nextStep < 0 || emptyAt != null;
+        NeedsResolver.Resolution resolution =
+                resolve(pool, slot, index, rows, null);
 
-        return new RunProgress(slot.skill(), slot.args(), label, steps.size(), arrivedCount,
-                nextStep, terminal, emptyAt, null);
+        List<RunProgress.Need> needs = resolution.needs().stream()
+                .map(n -> new RunProgress.Need(n.id(), n.what(), n.state().name()))
+                .toList();
+        int active = (int) resolution.needs().stream()
+                .filter(NeedsResolver.NeedStatus::active).count();
+        int met = resolution.in(NeedsResolver.State.FILLED).size();
+        List<String> wanted = resolution.wanted().stream()
+                .map(id -> slot.skill() + "#" + id)
+                .toList();
+
+        return new RunProgress(slot.skill(), slot.args(), label, active, met, wanted,
+                resolution.terminal(), resolution.outcome().name(), needs, null);
     }
 
-    private static String stepKey(RunSlot slot, QueryPool.Query q) {
-        return slot.argsPart().isEmpty() ? q.queryId() : q.queryId() + "__" + slot.argsPart();
+    /** 이 run 의 판정 한 벌 — 도착 창구와 도달 가능성을 같은 {@code without} 으로 묶는다. */
+    private static NeedsResolver.Resolution resolve(
+            QueryPool pool, RunSlot slot, Map<String, SnapshotIndexEntry> index,
+            Map<String, ChatDataSnapshot> rows, String without) {
+        NeedsResolver.Rows arrived = rowsOf(slot, index, rows, without);
+        return NeedsResolver.resolve(pool.needsOf(slot.skill()), arrived,
+                NeedsResolver.reachOf(pool.wiringOf(slot.skill()), arrived));
+    }
+
+    /**
+     * 판정기가 도착 데이터를 읽는 창구.
+     *
+     * <p>행 실물이 실려 있으면 그걸로 읽고, 요약만 있으면 <b>"찼지만 값은 모른다"</b>
+     * ({@link NeedsResolver.Cell#OPAQUE})로 준다 — 경량 판정(T16)에서도 채워짐은
+     * 판정되지만 갈래({@code when})는 못 연다. 요약조차 컬럼을 안 실었으면 행이 온
+     * 사실만 믿는다: 컬럼 목록이 없다는 것은 "그 컬럼이 없다"가 아니다.
+     *
+     * @param without 이 키를 미도착으로 치고 본다(서술 전이의 인과 판정). null 이면 전부 본다.
+     */
+    private static NeedsResolver.Rows rowsOf(
+            RunSlot slot, Map<String, SnapshotIndexEntry> index,
+            Map<String, ChatDataSnapshot> rows, String without) {
+        return (queryId, column) -> {
+            String key = keyOf(slot, slot.skill() + "#" + queryId);
+            if (key.equals(without)) {
+                return null;
+            }
+            SnapshotIndexEntry hit = index.get(key);
+            if (hit == null || !hit.arrived()) {
+                return null;
+            }
+            if (hit.isEmptyResult()) {
+                return NeedsResolver.Cell.EMPTY;
+            }
+            ChatDataSnapshot full = rows.get(key);
+            if (full != null && full.hasRows()) {
+                return NeedsResolver.Cell.of(QueryProgress.valuesOf(full, column));
+            }
+            return hasColumn(hit.columns(), column)
+                    ? NeedsResolver.Cell.OPAQUE
+                    : NeedsResolver.Cell.EMPTY;
+        };
+    }
+
+    /** 컬럼 목록을 모르면(null) 있다고 본다 — 모름을 부재로 접지 않는다. */
+    private static boolean hasColumn(List<String> columns, String column) {
+        if (columns == null || column == null) {
+            return true;
+        }
+        return columns.stream()
+                .anyMatch(c -> c != null && c.trim().equalsIgnoreCase(column.trim()));
+    }
+
+    private static String keyOf(RunSlot slot, String queryId) {
+        return slot.argsPart().isEmpty() ? queryId : queryId + "__" + slot.argsPart();
     }
 
     private static String label(RunSlot slot) {
@@ -273,8 +331,7 @@ public final class PanelJudge {
             return null; // 도착이 아닌 액션(휴지통 이동·체크 해제 등)은 서술 대상이 아니다.
         }
         QueryKey.Parsed parsed = QueryKey.parse(eventKey);
-        QueryPool.Query eventQuery =
-                parsed == null ? null : pool.byId(parsed.skill() + "#" + parsed.step());
+        QueryPool.Query eventQuery = parsed == null ? null : pool.byId(parsed.queryId());
         if (eventQuery == null) {
             return null;
         }
@@ -290,37 +347,21 @@ public final class PanelJudge {
             return null;
         }
 
-        List<QueryPool.Query> steps = pool.stepsOf(run.skill());
-        if (!terminalWith(steps, run, index, null) || terminalWith(steps, run, index, eventKey)) {
+        NeedsResolver.Resolution now = resolve(pool, run, index, rows, null);
+        NeedsResolver.Resolution before = resolve(pool, run, index, rows, eventKey);
+        if (!now.terminal() || before.terminal()) {
             return null; // 종결이 아니거나, 이 이벤트 없이도 종결이던 절차다.
         }
-        List<StepArrival> arrivals = new ArrayList<>();
-        for (QueryPool.Query q : steps) {
-            String key = stepKey(run, q);
+
+        List<QueryArrival> arrivals = new ArrayList<>();
+        for (QueryPool.Query q : pool.queriesOf(run.skill())) {
+            String key = keyOf(run, q.queryId());
             SnapshotIndexEntry hit = index.get(key);
             if (hit == null || !hit.arrived()) {
                 continue;
             }
-            arrivals.add(new StepArrival(q, hit, rows.get(key)));
+            arrivals.add(new QueryArrival(q, hit, rows.get(key)));
         }
-        return new Narration(label(run), run.skill(), run.args(), List.copyOf(arrivals));
+        return new Narration(label(run), run.skill(), run.args(), List.copyOf(arrivals), now);
     }
-
-    /** {@code without} 키를 미도착으로 치고 본 종결 여부. */
-    private static boolean terminalWith(
-            List<QueryPool.Query> steps, RunSlot run,
-            Map<String, SnapshotIndexEntry> index, String without) {
-        boolean allArrived = true;
-        for (QueryPool.Query q : steps) {
-            String key = stepKey(run, q);
-            SnapshotIndexEntry hit = key.equals(without) ? null : index.get(key);
-            if (hit == null || !hit.arrived()) {
-                allArrived = false;
-            } else if (hit.isEmptyResult()) {
-                return true;
-            }
-        }
-        return allArrived;
-    }
-
 }

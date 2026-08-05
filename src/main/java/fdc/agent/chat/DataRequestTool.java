@@ -18,14 +18,14 @@ import java.util.Set;
  * {@code dataRequests} → FE 요청 카드로 나간다.
  *
  * <p><b>모델은 고르기만 한다.</b> 요청 가능한 조회는 {@link QueryPool}(스킬 spec 의
- * {@code steps[]})에 등재된 것뿐이고, 모델이 주는 것은 {@code queryId} 와 스킬 인자
+ * {@code queries[]})에 등재된 것뿐이고, 모델이 주는 것은 {@code queryId} 와 스킬 인자
  * 값뿐이다. SQL 도 {@code queryKey} 도 기대 컬럼도 BE 가 만든다 — 사용자가 사내에서
  * 자기 권한으로 실행할 문장을 모델이 저작하게 두지 않는다.
  *
- * <p><b>이어가기는 도착에서 나온다.</b> 앞 단계 결과를 바인드로 쓰는 조회는 그 단계의
+ * <p><b>이어가기는 도착에서 나온다.</b> 다른 조달 결과를 바인드로 쓰는 조회는 그것의
  * 스냅샷이 도착해 있어야 나갈 수 있고, 값은 도착한 표에서 읽는다. 여러 값이면 모델이
  * {@code pick} 으로 고르되 <b>실제로 있는 값 중에서만</b> 고른다 — 갈림길은 맡기고
- * 창작은 막는다. 0행으로 확인된 단계에 매달린 조회는 이어가지 않는다: 없다는 것도
+ * 창작은 막는다. 0행으로 확인된 조달에 매달린 조회는 이어가지 않는다: 없다는 것도
  * 사실이고, 그 사실로 답하는 게 맞다.
  *
  * <p><b>억제가 왕복을 끝낸다</b>: 이미 도착한 키이거나 이번 응답에서 이미 요청한 키면
@@ -75,8 +75,8 @@ public final class DataRequestTool implements AgentTool {
                 + " 툴로 등재된 조회 목록에서 골라 요청하라 — queryId 와 스킬 인자(args)만 주면 된다"
                 + "(SQL·조회 키는 서버가 만든다). 목록에 없는 조회는 요청할 수 없다. "
                 + ChatPrompt.SECTION_PROGRESS + " 에 \"다음 =\" 이 적혀 있으면 그 줄대로 이어서 요청하고, "
-                + "바인드가 준비된 단계가 여럿이면 한 응답에서 여러 번 불러도 된다. "
-                + "0행으로 끝난 절차는 더 요청하지 말고 데이터가 없다는 사실로 답하라.";
+                + "바인드가 준비된 조달이 여럿이면 한 응답에서 여러 번 불러도 된다. "
+                + "\"더 조달할 수단이 없다\" 고 적힌 절차는 더 요청하지 말고 확인되지 않았다는 사실로 답하라.";
     }
 
     @Override
@@ -87,7 +87,7 @@ public final class DataRequestTool implements AgentTool {
         props.put("args", ToolArgs.stringMap(
                 "스킬 인자 값 — 목록의 (인자: …) 이름 그대로. 예: {\"snsr_id\": \"S-0004\"}"));
         props.put("pick", ToolArgs.stringMap(
-                "앞 단계 결과가 여러 행일 때만 — 어느 값으로 이어갈지. 컬럼명: 값. "
+                "앞 조달 결과가 여러 행일 때만 — 어느 값으로 이어갈지. 컬럼명: 값. "
                         + "예: {\"EQP_ID\": \"CVD-01\"}. 그 컬럼에 실제로 있는 값만 쓸 수 있다."));
         return ToolArgs.schema(props, List.of("queryId", "args"));
     }
@@ -108,7 +108,7 @@ public final class DataRequestTool implements AgentTool {
 
         Map<String, String> runArgs = resolveArgs(query, ToolArgs.map(args, "args"));
         if (runArgs == null) {
-            return ToolResult.of("어느 절차의 " + (query.step() + 1) + "단계인지 인자로 지정하세요 — "
+            return ToolResult.of("어느 절차의 " + query.id() + " 인지 인자로 지정하세요 — "
                     + query.skill() + " 로 진행 중인 절차가 여럿입니다: " + runLabels(query.skill()));
         }
         List<String> missing = missingArgs(query, runArgs);
@@ -117,16 +117,16 @@ public final class DataRequestTool implements AgentTool {
                     + ". 값을 모르면 " + InputRequestTool.NAME + " 으로 사용자에게 물으세요.");
         }
 
-        String queryKey = QueryKey.of(query.skill(), query.step(), runArgs, query.requiredArgs());
+        String queryKey = QueryKey.of(query.skill(), query.id(), runArgs, query.requiredArgs());
         ChatDataSnapshot already = progress.arrived(queryKey);
         if (already != null) {
             return ToolResult.of(already.isEmptyResult()
-                    ? "이 조회는 이미 0행으로 확인됐습니다: " + query.title()
+                    ? "이 조회는 이미 0행으로 확인됐습니다: " + query.label()
                             + " — 데이터가 없다는 사실로 답하라."
-                    : "이미 도착한 데이터입니다: " + query.title() + " — 그 데이터로 분석을 이어가라.");
+                    : "이미 도착한 데이터입니다: " + query.label() + " — 그 데이터로 분석을 이어가라.");
         }
         if (!requested.add(queryKey)) {
-            return ToolResult.of("이번 응답에서 이미 요청한 데이터입니다: " + query.title());
+            return ToolResult.of("이번 응답에서 이미 요청한 데이터입니다: " + query.label());
         }
 
         BindOutcome outcome = BindResolver.resolve(
@@ -145,7 +145,7 @@ public final class DataRequestTool implements AgentTool {
             return ToolResult.of("조회 문장을 완성하지 못했습니다: " + bad.getMessage());
         }
 
-        String label = query.title() + argsSuffix(runArgs, query.requiredArgs());
+        String label = query.label() + argsSuffix(runArgs, query.requiredArgs());
         collected.add(new DataRequest(queryKey, label, sql, SqlRender.columnsOf(query.sql()),
                 new RunDecl(query.skill(), runArgs)));
         return ToolResult.of("데이터 요청을 등록했습니다: " + label
@@ -192,11 +192,11 @@ public final class DataRequestTool implements AgentTool {
      */
     private static String prose(BindOutcome outcome) {
         return switch (outcome) {
-            case BindOutcome.MissingUpstream m -> (m.step() + 1) + "단계 결과가 먼저 필요합니다"
+            case BindOutcome.MissingUpstream m -> m.query() + " 결과가 먼저 필요합니다"
                     + " — queryId=\"" + m.queryId() + "\" 을 먼저 요청하세요.";
-            case BindOutcome.EmptyUpstream e -> (e.step() + 1) + "단계 조회 결과가 0행이라 이어갈 수 없습니다"
+            case BindOutcome.EmptyUpstream e -> e.query() + " 조회 결과가 0행이라 이어갈 수 없습니다"
                     + " — 데이터가 없다는 사실로 답하세요.";
-            case BindOutcome.NeedPick p -> (p.step() + 1) + "단계 결과의 " + p.column()
+            case BindOutcome.NeedPick p -> p.query() + " 결과의 " + p.column()
                     + " 이 여러 값입니다 — pick 으로 하나를 고르세요. "
                     + BindResolver.candidates(p.candidates());
             case BindOutcome.Blocked b -> b.reason();
