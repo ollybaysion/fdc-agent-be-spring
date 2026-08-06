@@ -153,10 +153,11 @@ class AltFillJudgeTest {
     @Test
     void 못_채운_것이_없으면_묻지_않는다() {
         Scripted llm = new Scripted("{\"fills\":[]}");
-        // 두 need 가 모두 찬 상태 — 남은 것이 없으니 물어볼 것도 없다.
+        // 두 need 가 지목한 조달이 모두 도착 — 남은 것이 없으니 물어볼 것도 없다.
         List<ChatDataSnapshot> full = List.of(
-                new ChatDataSnapshot(BASE, "기준", "2026-08-01T00:00",
-                        List.of("A", "B", "C"), 1, List.of(List.of("a1", "b1", "c1"))),
+                baseRow(),
+                new ChatDataSnapshot("t-two-step#detail_row__id=X-1", "상세",
+                        "2026-08-01T00:10", List.of("C"), 1, List.of(List.of("c1"))),
                 pasted());
 
         assertThat(AltFillJudge.ask(llm, POOL, body(full), progressOf(full))).isEmpty();

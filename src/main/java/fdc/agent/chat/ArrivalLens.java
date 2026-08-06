@@ -19,6 +19,13 @@ import java.util.Set;
  * 목적이므로, 수단이 달랐다는 이유로 목적이 안 찼다고 하면 사람이 이미 가진 답을
  * 다시 조회하라고 시키게 된다.
  *
+ * <p><b>2차는 풀 밖의 표만 본다.</b> 풀 안의 키로 등록된 스냅샷은 어느 조달의
+ * 결과인지가 이미 정해져 있고, spec 은 need 마다 <b>(조달, 컬럼)</b> 을 못 박아
+ * 두었다 — 같은 스킬의 다른 조달에 이름이 같은 컬럼이 있다고 그것이 같은 사실은
+ * 아니다. {@code fdc_sensor.USE_YN}(센서가 쓰이나)과 {@code fdc_equipment.USE_YN}
+ * (설비가 쓰이나)이 그 실물이다. 이름으로 이어 버리면 판정이 조용히 틀린 값을
+ * 답으로 올린다.
+ *
  * <p><b>도착한 1차는 뒤집지 않는다.</b> 지목한 조달이 0행으로 도착했으면 그것으로
  * 끝이고 2차를 보지 않는다 — 0행은 미도착이 아니라 "없다"는 사실이고, 다른 표에
  * 값이 보인다고 그 사실을 갈아치우면 판정이 데이터마다 달라진다.
@@ -124,19 +131,16 @@ public final class ArrivalLens implements NeedsResolver.Rows {
     /**
      * 이 표가 같은 대상의 것인가, 그렇다면 그 컬럼의 값은.
      *
-     * <p>풀 형식 키면 <b>run 이름표</b>가 대조 근거다 — 이름표는 인자 이름=값이라
-     * 스킬이 달라도 같은 값이면 같은 대상이다. 풀 밖의 자유 저작 표는 이름표가 없으니
-     * <b>행 안에서</b> 대조한다: 인자 이름과 같은 컬럼이 있고 그 값이 인자 값과 맞는
-     * 행에서만 읽는다. 표 전체를 믿으면 다른 설비의 값을 이 절차의 사실로 들인다.
+     * <p>풀 형식 키는 <b>보지 않는다</b> — 어느 조달의 결과인지가 이미 정해져 있고,
+     * spec 이 need 마다 (조달, 컬럼)을 못 박았다. 이름이 같은 남의 컬럼을 끌어오면
+     * 조용히 틀린 사실이 답으로 간다.
+     *
+     * <p>남는 것은 이름표가 없는 자유 저작 표다. 그때는 <b>행 안에서</b> 대조한다:
+     * 인자 이름과 같은 컬럼이 있고 그 값이 인자 값과 맞는 행에서만 읽는다. 표 전체를
+     * 믿으면 다른 설비의 값을 이 절차의 사실로 들인다.
      */
     private List<String> sameRunValues(String key, ChatDataSnapshot full, String column) {
-        QueryKey.Parsed parsed = QueryKey.parse(key);
-        if (parsed != null) {
-            return parsed.argsPart().equals(argsPart)
-                    ? QueryProgress.valuesOf(full, column)
-                    : List.of();
-        }
-        return matchingRowValues(full, column);
+        return QueryKey.parse(key) != null ? List.of() : matchingRowValues(full, column);
     }
 
     /** run 인자가 전부 일치하는 행에서만 그 컬럼을 읽는다. 대조할 컬럼이 없으면 빈 목록. */

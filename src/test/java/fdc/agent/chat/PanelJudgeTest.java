@@ -285,20 +285,21 @@ class PanelJudgeTest {
     // ── 2차 채움(다른 경로로 온 같은 사실) ───────────────────────────────────
 
     @Test
-    void 다른_조달의_표에_그_컬럼이_있으면_채워진다() {
-        // 조달은 수단이고 need 가 목적이다 — 수단이 달랐다고 목적이 안 찬 것은 아니다.
+    void 같은_스킬의_다른_조달에_동명_컬럼이_있어도_끌어오지_않는다() {
+        // spec 은 need 마다 (조달, 컬럼)을 못 박았다. fdc_sensor.USE_YN(센서가 쓰이나)과
+        // fdc_equipment.USE_YN(설비가 쓰이나)처럼 이름만 같고 뜻이 다른 컬럼을 이으면
+        // 조용히 틀린 사실이 답으로 간다.
         ChatDataSnapshot wide = new ChatDataSnapshot(BASE, "기준", "2026-08-01T00:00",
                 List.of("A", "B", "C"), 1, List.of(List.of("a1", "b1", "c9")));
 
         Verdict v = PanelJudge.judge(pool(), body(null, null, List.of(wide), declared()));
 
         RunProgress run = v.runsProgress().get(0);
-        assertThat(run.metCount()).isEqualTo(2);
-        assertThat(run.terminal()).isTrue();
-        assertThat(run.outcome()).isEqualTo("SUFFICIENT");
-        RunProgress.Need detail = run.needs().get(1);
-        assertThat(detail.state()).isEqualTo("FILLED");
-        assertThat(detail.source()).isEqualTo(BASE); // 시킨 조회가 아니라는 사실을 남긴다.
+        assertThat(run.metCount()).isEqualTo(1);
+        assertThat(run.needs().get(1).state()).isEqualTo("UNFILLED");
+        assertThat(run.needs().get(1).source()).isNull();
+        // 그 조회는 여전히 열려 있어야 한다 — 안 그러면 영영 못 채운다.
+        assertThat(ledgerOf(v, DETAIL).state()).isEqualTo(RequestState.READY);
     }
 
     @Test
@@ -306,10 +307,13 @@ class PanelJudgeTest {
         // 0행은 미도착이 아니라 "없다"는 사실 — 다른 표에 값이 보여도 그 사실이 이긴다.
         ChatDataSnapshot emptyDetail =
                 new ChatDataSnapshot(DETAIL, "상세", "2026-08-01T00:10", List.of("C"), 0, List.of());
-        ChatDataSnapshot wide = new ChatDataSnapshot(BASE, "기준", "2026-08-01T00:00",
-                List.of("A", "B", "C"), 1, List.of(List.of("a1", "b1", "c9")));
+        ChatDataSnapshot pasted = new ChatDataSnapshot("붙여넣은-표", "내 표", "2026-08-01T00:00",
+                List.of("id", "C"), 1, List.of(List.of("X-1", "c9")));
 
-        Verdict v = PanelJudge.judge(pool(), body(null, null, List.of(wide, emptyDetail), declared()));
+        Verdict v = PanelJudge.judge(pool(), body(null, null,
+                List.of(baseRow("2026-08-01T00:00", List.of(List.of("a1", "b1"))),
+                        pasted, emptyDetail),
+                declared()));
 
         RunProgress run = v.runsProgress().get(0);
         assertThat(run.needs().get(1).state()).isEqualTo("UNPROCURABLE");
