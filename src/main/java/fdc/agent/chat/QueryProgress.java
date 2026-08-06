@@ -110,6 +110,11 @@ public final class QueryProgress {
         return queryKey == null ? null : arrivedByKey.get(queryKey.trim());
     }
 
+    /** 도착 전량(키 → 스냅샷, 풀 밖 키 포함) — 판정 창구를 다시 세울 때 쓴다. */
+    public Map<String, ChatDataSnapshot> arrivedByKey() {
+        return arrivedByKey;
+    }
+
     /**
      * 스냅샷의 한 컬럼에 실제로 있는 값들(중복·공백 제거, 등장 순서). 컬럼 이름은
      * 대소문자를 가리지 않는다 — spec 의 {@code column} 은 대문자, 붙여넣은 헤더는
@@ -173,13 +178,13 @@ public final class QueryProgress {
                     "  더 조달할 수단이 없다 — 모르는 것은 확인되지 않았다는 사실로 답하고,"
                             + " 더 요청하지 마라.");
             case PROCURABLE -> {
-                String next = run.resolution().wanted().stream().findFirst().orElse(null);
-                QueryPool.Query query = next == null ? null : pool.byId(run.skill() + "#" + next);
-                if (query == null) {
+                // 조달 단위가 need 라 다음 걸음도 "어느 조회"가 아니라 "이 절차를 더
+                // 돌려라"다 — 무엇을 돌릴지는 서버가 판정으로 정한다.
+                if (run.resolution().wanted().isEmpty()) {
                     yield List.of();
                 }
-                yield List.of("  다음 = " + query.label() + " — " + DataRequestTool.NAME
-                        + "(queryId=\"" + query.queryId() + "\", args=" + argsJson(run.args()) + ")");
+                yield List.of("  다음 = " + RetrieveDataTool.NAME + "(skill=\"" + run.skill()
+                        + "\", args=" + argsJson(run.args()) + ") — 모자란 것을 마저 조달한다.");
             }
         };
     }

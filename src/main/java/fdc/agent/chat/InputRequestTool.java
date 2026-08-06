@@ -11,7 +11,7 @@ import java.util.Set;
 
 /**
  * {@code request_input} — 스킬에 필요한 스칼라 값 하나를 <b>사용자에게 입력 요청</b>하는
- * 수집 툴. {@link DataRequestTool} 과 같은 자리에 있고 같은 규율을 따른다: 실행하지 않고
+ * 수집 툴. {@link RetrieveDataTool} 과 같은 자리에 있고 같은 규율을 따른다: 실행하지 않고
  * 모아 두었다가 done 페이로드의 {@code inputRequests} → FE 입력 카드로 나간다.
  *
  * <p>이미 값이 있는 (skill, key) 는 카드로 내보내지 않는다. 이미 있는 값은 두 곳에서

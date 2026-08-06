@@ -1,9 +1,9 @@
 package fdc.agent.llm;
 
 import fdc.agent.chat.ChatPrompt;
-import fdc.agent.chat.DataRequestTool;
 import fdc.agent.chat.NarrationPrompt;
 import fdc.agent.chat.InputRequestTool;
+import fdc.agent.chat.RetrieveDataTool;
 import fdc.agent.chat.SnapshotQueryTool;
 import fdc.agent.contract.Role;
 import fdc.agent.llm.LlmTypes.LlmClient;
@@ -11,7 +11,7 @@ import fdc.agent.llm.LlmTypes.LlmMessage;
 import fdc.agent.llm.LlmTypes.LlmToolCall;
 import fdc.agent.llm.LlmTypes.LlmToolSpec;
 import fdc.agent.llm.LlmTypes.LlmTurn;
-import fdc.agent.skills.QueryPool;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -36,14 +36,14 @@ public class MockLlm implements LlmClient {
     private static final Pattern SENSOR_RE = Pattern.compile("\\bS-\\d{3,}\\b");
     // 진행 상황 섹션이 적어 준 다음 한 걸음 — 그대로 베껴 부르면 절차가 이어진다.
     private static final Pattern NEXT_STEP =
-            Pattern.compile("queryId=\"([^\"]+)\",\\s*args=(\\{[^}]*})");
+            Pattern.compile("skill=\"([^\"]+)\",\\s*args=(\\{[^}]*})");
     private static final Pattern JSON_PAIR = Pattern.compile("\"([^\"]+)\"\\s*:\\s*\"([^\"]*)\"");
     // 사용자가 "직접 실행할 SQL 을 달라"고 말한 신호 — 조달 요청의 시작.
     private static final Pattern WANTS_SQL =
             Pattern.compile("SQL|쿼리\\s*(줘|주세요|요청)|조달|요청\\s*카드", Pattern.CASE_INSENSITIVE);
-    // request_data 툴 설명에 실린 풀 목록 한 줄 — "- id — 라벨 (인자: a, b) ※ …".
+    // retrieve_data 툴 설명에 실린 스킬 목록 한 줄 — "- 스킬명 (인자: a, b)".
     private static final Pattern CATALOG_LINE =
-            Pattern.compile("(?m)^- (\\S+) — .*?\\(인자: ([^)]*)\\)(.*)$");
+            Pattern.compile("(?m)^- (\\S+) \\(인자: ([^)]*)\\)\\s*$");
     // 붙여넣은 데이터를 조회하겠다는 신호 — 원 질문에서만 찾는다.
     // "등록 완료"는 요청 카드를 채운 뒤의 이어가기 발화 — 적재된 표를 조회해 근거로 답한다.
     private static final Pattern WANTS_SNAPSHOT_QUERY =
@@ -55,7 +55,13 @@ public class MockLlm implements LlmClient {
     public LlmTurn next(List<LlmMessage> messages, List<LlmToolSpec> tools) {
         LlmMessage last = messages.isEmpty() ? null : messages.get(messages.size() - 1);
         if (last != null && last.role() == Role.TOOL) {
-            return new LlmTurn.Final(last.content() != null ? last.content() : "");
+            String content = last.content() != null ? last.content() : "";
+            // 조달 툴은 사람이 읽을 문장이 아니라 원장(JSON)을 돌려준다 — 실 모델이
+            // 해석해 쓸 자리를 목은 결정적 요약으로 흉내낸다. 되읽기로는 화면에
+            // JSON 이 그대로 나간다.
+            return new LlmTurn.Final(RetrieveDataTool.NAME.equals(last.name())
+                    ? retrievalSummary(content)
+                    : content);
         }
         String question = lastUserText(messages);
         // 후속 질문 프롬프트(ChatAgent.suggestFollowups)에는 결정적 추천을 돌려준다.
@@ -88,6 +94,51 @@ public class MockLlm implements LlmClient {
         return "";
     }
 
+    /**
+     * {@code retrieve_data} 원장 → 사람이 읽을 한 문단. 실 모델이라면 여기서 도착한
+     * 값을 해석하겠지만, 목은 <b>무엇을 요청했고 무엇이 막혔나</b>만 결정적으로 옮긴다.
+     */
+    static String retrievalSummary(String json) {
+        List<String> lines = new ArrayList<>();
+        for (String what : jsonValues(json, "requested", "what")) {
+            lines.add("- " + what);
+        }
+        if (!lines.isEmpty()) {
+            lines.add(0, "데이터 요청을 등록했습니다. 데이터 패널 카드의 SQL 을 실행해 결과를 붙여넣어"
+                    + " 주세요 — 조회 결과가 없으면 \"결과 없음\"으로 등록하시면 그것도 사실로 받습니다.");
+            return String.join("\n", lines);
+        }
+        List<String> stuck = jsonValues(json, "blocked", "what");
+        if (!stuck.isEmpty()) {
+            return "지금 조달할 수 있는 것이 없습니다: " + String.join(", ", stuck)
+                    + ". 확인되지 않은 것은 확인되지 않았다고 답합니다.";
+        }
+        return "필요한 데이터가 모두 확인됐습니다.";
+    }
+
+    /**
+     * {@code {"<section>":[{…,"<field>":"값"}]}} 에서 값들만. 목이 JSON 을 읽는 유일한
+     * 자리라 파서를 들이지 않는다 — 섹션 뒤 첫 대괄호 블록 안에서만 찾는다.
+     */
+    private static List<String> jsonValues(String json, String section, String field) {
+        int at = json.indexOf("\"" + section + "\"");
+        if (at < 0) {
+            return List.of();
+        }
+        int open = json.indexOf('[', at);
+        int close = json.indexOf(']', open);
+        if (open < 0 || close < 0) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>();
+        Matcher m = Pattern.compile("\"" + field + "\"\\s*:\\s*\"([^\"]*)\"")
+                .matcher(json.substring(open, close));
+        while (m.find()) {
+            out.add(m.group(1));
+        }
+        return out;
+    }
+
     /** 마지막 assistant 발화 — 종결 서술 경로에서는 판정 턴이다. 없으면 빈 문자열. */
     private static String lastAssistantText(List<LlmMessage> messages) {
         for (int i = messages.size() - 1; i >= 0; i--) {
@@ -118,11 +169,11 @@ public class MockLlm implements LlmClient {
         // 진행 중인 절차가 다음 걸음을 적어 뒀으면 그걸 이어 부른다 — 실 모델이 판단할
         // "계속할까"를 목은 "적혀 있으면 간다"로 흉내낸다. 0행으로 끝난 절차에는 다음
         // 걸음이 적히지 않으므로 여기서 자연히 멈춘다(억제가 아니라 부재로).
-        if (has(tools, DataRequestTool.NAME)) {
+        if (has(tools, RetrieveDataTool.NAME)) {
             Matcher next = NEXT_STEP.matcher(section);
             if (next.find()) {
-                return new LlmToolCall("call_1", DataRequestTool.NAME, Map.of(
-                        "queryId", next.group(1), "args", parseJsonPairs(next.group(2))));
+                return new LlmToolCall("call_1", RetrieveDataTool.NAME, Map.of(
+                        "skill", next.group(1), "args", parseJsonPairs(next.group(2))));
             }
         }
 
@@ -130,12 +181,12 @@ public class MockLlm implements LlmClient {
         // 어느 스킬인지는 목이 모른다: 툴 스펙에 실린 카탈로그에서 인자 이름으로 찾는다
         // (스킬이 늘거나 이름이 바뀌어도 목은 무수정).
         Matcher sqlSensor = SENSOR_RE.matcher(question);
-        if (has(tools, DataRequestTool.NAME) && WANTS_SQL.matcher(question).find()
+        if (has(tools, RetrieveDataTool.NAME) && WANTS_SQL.matcher(question).find()
                 && sqlSensor.find()) {
-            String queryId = firstPoolStep(tools, "snsr_id");
-            if (queryId != null) {
-                return new LlmToolCall("call_1", DataRequestTool.NAME, Map.of(
-                        "queryId", queryId, "args", Map.of("snsr_id", sqlSensor.group())));
+            String skill = skillTaking(tools, "snsr_id");
+            if (skill != null) {
+                return new LlmToolCall("call_1", RetrieveDataTool.NAME, Map.of(
+                        "skill", skill, "args", Map.of("snsr_id", sqlSensor.group())));
             }
         }
 
@@ -190,37 +241,37 @@ public class MockLlm implements LlmClient {
     }
 
     /**
-     * 풀에서 <b>주어진 인자만으로 지금 부를 수 있는 첫 조달</b>의 queryId. 목록은
-     * request_data 툴 스펙의 queryId 설명에 실려 오므로, 목은 스킬 이름을 하나도
-     * 알 필요가 없다.
+     * <b>딱 이 인자들만 요구하는 스킬</b>의 이름. 목록은 retrieve_data 툴 스펙의
+     * skill 설명에 실려 오므로 목은 스킬 이름을 하나도 알 필요가 없다 — 스킬이
+     * 늘거나 이름이 바뀌어도 무수정이다.
      *
-     * <p>"지금 부를 수 있나"는 의존 표시의 부재로 읽는다 — spec v3 의 조달 목록은
-     * 카탈로그라 순서가 없고, 따라서 "첫 단계"라는 자리도 없다.
+     * <p>조달 단위가 need 로 바뀌면서 목이 고를 것도 "어느 조회"가 아니라 "어느
+     * 절차"가 됐다. 무엇을 먼저 돌릴지는 서버가 판정으로 정한다.
      */
-    private static String firstPoolStep(List<LlmToolSpec> tools, String... argNames) {
-        Matcher line = CATALOG_LINE.matcher(queryIdDescription(tools));
+    private static String skillTaking(List<LlmToolSpec> tools, String... argNames) {
+        Matcher line = CATALOG_LINE.matcher(skillDescription(tools));
         List<String> wanted = List.of(argNames);
         while (line.find()) {
             List<String> args = Arrays.stream(line.group(2).split(","))
                     .map(String::trim)
                     .filter(s -> !s.isEmpty())
                     .toList();
-            if (args.equals(wanted) && !line.group(3).contains(QueryPool.DEPENDS_MARK)) {
+            if (args.equals(wanted)) {
                 return line.group(1);
             }
         }
         return null;
     }
 
-    /** request_data 툴 스펙의 queryId 설명(= 등재된 조회 목록). 툴이 없으면 빈 문자열. */
-    private static String queryIdDescription(List<LlmToolSpec> tools) {
+    /** retrieve_data 툴 스펙의 skill 설명(= 등재된 스킬 목록). 툴이 없으면 빈 문자열. */
+    private static String skillDescription(List<LlmToolSpec> tools) {
         for (LlmToolSpec tool : tools) {
-            if (!tool.name().equals(DataRequestTool.NAME)) {
+            if (!tool.name().equals(RetrieveDataTool.NAME)) {
                 continue;
             }
             if (tool.parameters().get("properties") instanceof Map<?, ?> props
-                    && props.get("queryId") instanceof Map<?, ?> queryId) {
-                return String.valueOf(queryId.get("description"));
+                    && props.get("skill") instanceof Map<?, ?> skill) {
+                return String.valueOf(skill.get("description"));
             }
         }
         return "";

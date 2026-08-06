@@ -11,7 +11,7 @@ import java.util.function.Function;
 /**
  * 조달 수단의 SQL 에 박을 값들을 해석한다 — {@code from:"arg"} 는 인자에서,
  * {@code from:"query"} 는 <b>도착한 다른 조달의 스냅샷에서</b>. 값 추출·pick 검증의
- * 결정론 코어이고, 채팅 경로({@link DataRequestTool})와 패널 판정 경로
+ * 결정론 코어이고, 채팅 경로({@link RetrieveDataTool})와 패널 판정 경로
  * ({@link PanelJudge})가 이 한 곳을 공유한다(#38 T13) — 두 경로의 진행 판정이
  * 서로 다른 해석으로 갈라지면 안 된다.
  *
@@ -26,7 +26,9 @@ public final class BindResolver {
     private static final int MAX_CANDIDATES = 10;
 
     /**
-     * @param pick 갈림길 선택({@code column: 값}) — 없으면 빈 맵으로 취급
+     * @param pick 갈림길 선택({@code column: 값}) — 없으면 빈 맵으로 취급. <b>지금은 두
+     *     호출자 모두 null 을 준다</b>: 갈림길의 결정 주체가 미정이라(#50) 후보가 여럿이면
+     *     고르지 않고 잠긴 것으로 보고한다. 그 결정이 서면 이 자리가 받는다.
      * @param arrived queryKey → 도착한 스냅샷(행 있음 또는 0행 확인). 없으면 null
      */
     public static BindOutcome resolve(

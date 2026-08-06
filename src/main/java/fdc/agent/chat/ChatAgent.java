@@ -164,9 +164,9 @@ public class ChatAgent {
         QueryPool pool = QueryPool.of(skillSpecs);
         QueryProgress progress = QueryProgress.of(pool, dataSnapshots);
 
-        // 풀이 비면 request_data 를 아예 붙이지 않는다 — 요청할 수 있는 게 없는데 규칙만
+        // 풀이 비면 retrieve_data 를 아예 붙이지 않는다 — 요청할 수 있는 게 없는데 규칙만
         // 프롬프트에 남으면, 못 부를 툴을 쓰라고 지시하는 꼴이 된다.
-        DataRequestTool dataRequests = pool.isEmpty() ? null : new DataRequestTool(pool, progress);
+        RetrieveDataTool dataRequests = pool.isEmpty() ? null : new RetrieveDataTool(pool, progress);
         InputRequestTool inputRequests = new InputRequestTool(providedInputs, scope);
 
         List<AgentTool> tools = new ArrayList<>(SkillRegistry.compile(skillSpecs, skillQuery));
@@ -229,7 +229,7 @@ public class ChatAgent {
     }
 
     /** 조달 요청 — 풀이 비어 툴이 안 붙은 요청에서는 애초에 모일 것이 없다. */
-    private static List<DataRequest> collectedRequests(DataRequestTool tool) {
+    private static List<DataRequest> collectedRequests(RetrieveDataTool tool) {
         return tool != null ? tool.collected() : List.of();
     }
 
@@ -267,7 +267,7 @@ public class ChatAgent {
     /**
      * 툴 한 번의 왕복을 트레이스에 — LLM 이 채워 준 인자, 되먹인 요약, 딸려 나온 표.
      * 표는 제목·컬럼·행수만 남긴다(값 전량은 done 페이로드 트레이스에서 본다).
-     * 수집 툴(request_data·request_input)도 같은 경로라 자동으로 함께 찍힌다.
+     * 수집 툴(retrieve_data·request_input)도 같은 경로라 자동으로 함께 찍힌다.
      */
     private static void traceToolCall(LlmToolCall call, ToolResult result) {
         if (!Trace.on()) {

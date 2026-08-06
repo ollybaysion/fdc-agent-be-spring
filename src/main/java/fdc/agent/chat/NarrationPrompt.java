@@ -482,6 +482,7 @@ public final class NarrationPrompt {
         List<String> pending = new ArrayList<>();
         List<String> inactive = new ArrayList<>();
 
+        Set<String> replayed = replayedQueries(narration);
         for (NeedsResolver.NeedStatus need : resolution.needs()) {
             String what = need.what() != null && !need.what().isBlank() ? need.what() : need.id();
             // 「0행으로 도착」과 「조달 수단이 없음」은 판정 상태가 같다(UNPROCURABLE =
@@ -489,7 +490,9 @@ public final class NarrationPrompt {
             // ("없습니다" vs "확인할 방법이 없습니다") 도착 사실로 여기서 가른다.
             boolean empty = touchesEmpty(needsById.get(need.id()), emptyArrived);
             switch (need.state()) {
-                case FILLED -> filled.add(what);
+                case FILLED -> filled.add(offReplay(need, needsById.get(need.id()), replayed)
+                        ? what + " = " + need.value()
+                        : what);
                 case UNFILLED -> (empty ? confirmedEmpty : notArrived).add(what);
                 case UNPROCURABLE -> (empty ? confirmedEmpty : unprocurable).add(what);
                 case PENDING_GATE -> pending.add(what);
@@ -508,6 +511,39 @@ public final class NarrationPrompt {
         bucket(lines, "해당 없음", inactive);
         lines.add("더 조달할 것은 없다.");
         return String.join("\n", lines);
+    }
+
+    /**
+     * 이 사실이 <b>재생된 조달 밖에서</b> 왔는가 — 지목한 조달이 하나도 도착하지 않았는데
+     * 찼다면 다른 경로로 온 것이다(채움 폭포의 2·3차).
+     *
+     * <p>그때는 값을 함께 적는다. 안 그러면 모델은 tool 결과 어디에도 없는 사실을
+     * "확보됐다"는 말만 듣고 서술해야 하고, 그 자리가 정확히 지어내기가 나는 자리다.
+     * 값을 못 읽은 경우(경량 판정)는 이름만 적는다 — 없는 값을 적을 수는 없다.
+     */
+    private static boolean offReplay(
+            NeedsResolver.NeedStatus need, SkillSpec.SkillNeed spec, Set<String> replayed) {
+        if (need.value() == null || need.value().isBlank()) {
+            return false;
+        }
+        if (spec == null || spec.fills().isEmpty()) {
+            return true; // 조달 수단이 없는 need 가 찼다 = 밖에서 온 것이다.
+        }
+        for (SkillSpec.Fill fill : spec.fills()) {
+            if (fill != null && replayed.contains(fill.query())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** 이 서술에 재생된 조달들 — tool 결과로 모델이 실제로 본 것. */
+    private static Set<String> replayedQueries(Narration narration) {
+        Set<String> out = new LinkedHashSet<>();
+        for (QueryArrival arrival : narration.arrivals()) {
+            out.add(arrival.query().id());
+        }
+        return out;
     }
 
     private static void bucket(List<String> lines, String head, List<String> items) {

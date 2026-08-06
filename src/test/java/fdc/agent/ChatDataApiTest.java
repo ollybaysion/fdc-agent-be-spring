@@ -42,7 +42,7 @@ class ChatDataApiTest {
         assertThat(res.getStatus()).isEqualTo(200);
         String body = res.getContentAsString(StandardCharsets.UTF_8);
 
-        // 서술이 없으니 token 이벤트는 없다 — done 만. 카드는 응답에 없다(FE 로컬 판정).
+        // 서술이 없으니 token 이벤트는 없다 — done 만.
         assertThat(SseTestSupport.tokenText(body)).isEmpty();
         JsonNode done = SseTestSupport.donePayload(body);
         assertThat(done).isNotNull();
@@ -52,6 +52,36 @@ class ChatDataApiTest {
         assertThat(done.has("openRequests")).isFalse();
         assertThat(done.path("runsProgress").get(0).path("outcome").asText())
                 .isEqualTo("PROCURABLE");
+    }
+
+    @Test
+    void 조달_원장이_상태와_함께_전량_나간다() throws Exception {
+        // 원장은 이벤트가 아니라 상태 전량 — 잠긴 줄도 실리고 FE 는 replace 한다.
+        MockHttpServletResponse res = chatData("""
+                {"eventId":"e9","revision":1,
+                 "runs":[{"skill":"fdc-explain-sensor","args":{"snsr_id":"S-0004"}}]}
+                """);
+        JsonNode ledger = SseTestSupport.donePayload(res.getContentAsString(StandardCharsets.UTF_8))
+                .path("dataRequests");
+
+        assertThat(ledger.isArray()).isTrue();
+        assertThat(ledger).isNotEmpty();
+        JsonNode first = ledger.get(0);
+        assertThat(first.path("queryKey").asText()).isEqualTo(KEY0);
+        assertThat(first.path("state").asText()).isEqualTo("ready");
+        assertThat(first.path("sql").asText()).contains("S-0004");
+        assertThat(first.path("run").path("skill").asText()).isEqualTo("fdc-explain-sensor");
+        // 앞 조달을 무는 줄은 SQL 없이 사유만 — 화면은 이 상태를 그대로 그린다.
+        JsonNode blocked = null;
+        for (JsonNode row : ledger) {
+            if ("blocked".equals(row.path("state").asText())) {
+                blocked = row;
+                break;
+            }
+        }
+        assertThat(blocked).isNotNull();
+        assertThat(blocked.has("sql")).isFalse();
+        assertThat(blocked.path("blocked").asText()).isNotEmpty();
     }
 
     @Test

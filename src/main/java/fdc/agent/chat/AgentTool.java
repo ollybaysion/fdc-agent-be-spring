@@ -12,7 +12,7 @@ import java.util.Map;
  *
  * <p>툴은 두 갈래다. <b>조회 툴</b>은 실제로 데이터를 가져와 요약과 표를 돌려주고
  * (스킬 컴파일 결과 · {@link SnapshotQueryTool}), <b>수집 툴</b>은 실행하지 않고
- * "이게 필요하다"를 모아 done 페이로드로 내보낸다({@link DataRequestTool} ·
+ * "이게 필요하다"를 모아 done 페이로드로 내보낸다({@link RetrieveDataTool} ·
  * {@link InputRequestTool}). 루프는 둘을 구분하지 않는다 — 어느 쪽이든 이름으로 찾아
  * run 을 부르고 요약을 되먹인다. 수집한 것은 툴 자신이 들고 있다가 루프가 끝날 때
  * 꺼내 간다(수집 툴 인스턴스는 요청 단위).
