@@ -11,6 +11,7 @@ import fdc.agent.contract.QueryScope;
 import fdc.agent.llm.LlmTypes.LlmClient;
 import fdc.agent.llm.LlmTypes.LlmMessage;
 import fdc.agent.llm.LlmTypes.LlmTurn;
+import fdc.agent.schema.SchemaSource;
 import fdc.agent.skills.QueryPool;
 import fdc.agent.skills.SkillSource;
 import fdc.agent.skills.SkillSpec;
@@ -46,11 +47,14 @@ public class ChatDataController {
 
     private final LlmClient llm;
     private final SkillSource skillSource;
+    private final SchemaSource schemaSource;
     private final AppProps props;
 
-    public ChatDataController(LlmClient llm, SkillSource skillSource, AppProps props) {
+    public ChatDataController(
+            LlmClient llm, SkillSource skillSource, SchemaSource schemaSource, AppProps props) {
         this.llm = llm;
         this.skillSource = skillSource;
+        this.schemaSource = schemaSource;
         this.props = props;
     }
 
@@ -158,7 +162,8 @@ public class ChatDataController {
                 .filter(s -> s != null && narration.skill().equals(s.name()))
                 .findFirst()
                 .orElse(null);
-        List<LlmMessage> prompt = NarrationPrompt.messages(messages, scope, spec, narration);
+        List<LlmMessage> prompt =
+                NarrationPrompt.messages(messages, scope, spec, narration, schemaSource);
         try {
             Trace.emit("BE→LLM 종결 서술 요청 (툴 없음)", prompt);
             LlmTurn turn = llm.next(prompt, List.of());

@@ -9,6 +9,8 @@ import fdc.agent.contract.QueryScope;
 import fdc.agent.contract.Role;
 import fdc.agent.llm.LlmTypes.LlmMessage;
 import fdc.agent.llm.LlmTypes.LlmToolCall;
+import fdc.agent.schema.SchemaDoc;
+import fdc.agent.schema.SchemaSource;
 import fdc.agent.skills.NeedsResolver;
 import fdc.agent.skills.QueryPool;
 import fdc.agent.skills.SkillSpec;
@@ -18,8 +20,10 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 
 /**
  * 종결 서술 호출의 프롬프트 합성 — <b>절차가 실제로 추론으로 굴러갔다면 남았을
@@ -94,9 +98,11 @@ public final class NarrationPrompt {
      * @param spec 서술 대상 run 의 스킬 spec — 계획·조달 계획·서술 규칙의 재료.
      *     null 이면(풀과 spec 목록이 어긋난 경우) 판정에서 얻을 수 있는 것만으로
      *     합성한다: 답의 바닥은 spec 이 아니라 needs 판정이다.
+     * @param schemaSource 컬럼 의미 출처(#49) — null 이거나 겹치는 문서가 없으면
+     *     서술 규칙에 발췌 절이 생기지 않는다(BE 는 의미를 지어내지 않는다).
      */
-    public static List<LlmMessage> messages(
-            List<HistoryMessage> history, QueryScope scope, SkillSpec spec, Narration narration) {
+    public static List<LlmMessage> messages(List<HistoryMessage> history, QueryScope scope,
+            SkillSpec spec, Narration narration, SchemaSource schemaSource) {
         List<LlmMessage> out = new ArrayList<>();
         out.add(LlmMessage.of(Role.SYSTEM, IDENTITY));
         for (HistoryMessage m : history != null ? history : List.<HistoryMessage>of()) {
@@ -111,7 +117,8 @@ public final class NarrationPrompt {
         }
         out.addAll(replay(spec, narration));
         out.add(LlmMessage.of(Role.ASSISTANT, verdictTurn(spec, narration)));
-        out.add(LlmMessage.of(Role.SYSTEM, narrationRules(spec)));
+        out.add(LlmMessage.of(Role.SYSTEM,
+                narrationRules(spec, schemaExcerpt(narration, schemaSource))));
         out.add(LlmMessage.of(Role.USER, NARRATE_INSTRUCTION));
         return out;
     }
@@ -441,7 +448,7 @@ public final class NarrationPrompt {
             }
             ChatDataSnapshot full = a.full();
             if (a.hit().isEmptyResult()) {
-                item.put("columns", columnsOf(a));
+                item.put("columns", arrivedColumns(a));
                 item.put("rows", List.of());
             } else if (full == null || !full.hasRows()) {
                 // 판정 집합에는 도착으로 잡혔는데 rows 실물이 이 요청에 안 실렸다 —
@@ -449,7 +456,7 @@ public final class NarrationPrompt {
                 item.put("rowCount", a.hit().rowCount());
                 item.put("note", "행 전문이 이 요청에 실리지 않았다 — 값은 데이터 패널에 있다.");
             } else {
-                item.put("columns", full.columns() != null ? full.columns() : columnsOf(a));
+                item.put("columns", arrivedColumns(a));
                 item.put("rows", full.rows());
             }
             items.add(item);
@@ -460,6 +467,23 @@ public final class NarrationPrompt {
     private static List<String> columnsOf(QueryArrival arrival) {
         List<String> columns = arrival.hit().columns();
         return columns != null ? columns : List.of();
+    }
+
+    /**
+     * 이 도착이 tool 메시지에 실제로 실은 컬럼 — 0행이면 스키마만(값은 없어도 열은
+     * 안다), rows 실물이 이 요청에 안 실렸으면 하나도 없다({@link #arrivedJson} 이
+     * 그 경우 columns 자체를 안 싣는 것과 같은 판단). {@link #schemaExcerpt} 의
+     * 재료도 여기서 나온다 — 응답에 실리지 않은 컬럼의 의미가 섞여 들어갈 길이 없다.
+     */
+    private static List<String> arrivedColumns(QueryArrival a) {
+        if (a.hit().isEmptyResult()) {
+            return columnsOf(a);
+        }
+        ChatDataSnapshot full = a.full();
+        if (full == null || !full.hasRows()) {
+            return List.of();
+        }
+        return full.columns() != null ? full.columns() : columnsOf(a);
     }
 
     // ── 판정 ────────────────────────────────────────────────────────────────
@@ -584,9 +608,13 @@ public final class NarrationPrompt {
 
     /**
      * 서술 규칙 — 4 단계 밖의 별개 축이라 system 이다. 계획(무엇을 알아야 하나)도
-     * 판정(무엇이 찼나)도 아닌, <b>어떻게 쓸 것인가</b>만 여기 있다.
+     * 판정(무엇이 찼나)도 아닌, <b>어떻게 쓸 것인가</b>만 여기 있다. 컬럼 의미(#49)도
+     * 도착한 데이터를 어떻게 읽을 것인가이므로 별도 턴이 아니라 이 축의 절 하나로
+     * 얹는다.
+     *
+     * @param schemaExcerpt {@link #schemaExcerpt} 가 만든 절 — 없으면(null) 안 실린다.
      */
-    static String narrationRules(SkillSpec spec) {
+    static String narrationRules(SkillSpec spec, String schemaExcerpt) {
         List<String> parts = new ArrayList<>();
         parts.add(NO_INVENTION);
         if (spec != null && spec.output() != null && spec.output().avoid() != null
@@ -598,7 +626,73 @@ public final class NarrationPrompt {
             }
             parts.add(String.join("\n", lines));
         }
+        if (schemaExcerpt != null && !schemaExcerpt.isBlank()) {
+            parts.add(schemaExcerpt);
+        }
         return String.join("\n\n", parts);
+    }
+
+    /**
+     * 컬럼 의미 발췌 — 이 호출의 {@link #replay} 가 <b>실제로 실은</b> (테이블, 컬럼)
+     * 에서만 유도한다({@link #arrivedColumns}). 조달 계획이나 spec 선언이 아니라
+     * 응답에 실제로 담긴 것만 보므로 데이터와 설명이 어긋날 수 없다.
+     *
+     * <p>호출 내 중복은 {@code (테이블, 컬럼)} 키 union 으로 막는다(동명 컬럼이
+     * 테이블마다 뜻이 다를 수 있어 컬럼명 단독 키는 못 쓴다). 호출 간 중복은 별도
+     * 방어가 필요 없다 — {@link #messages} 의 히스토리 재생이 이전 턴의 SYSTEM 메시지
+     * 를 다시 넣지 않는다.
+     *
+     * @return schemaSource 가 없거나 겹치는 문서가 없으면 null.
+     */
+    private static String schemaExcerpt(Narration narration, SchemaSource schemaSource) {
+        if (schemaSource == null || narration == null) {
+            return null;
+        }
+        Map<String, Set<String>> columnsByTable = new TreeMap<>();
+        for (QueryArrival a : narration.arrivals()) {
+            String table = a.query().table();
+            if (table == null || table.isBlank()) {
+                continue;
+            }
+            for (String column : arrivedColumns(a)) {
+                columnsByTable.computeIfAbsent(table, t -> new TreeSet<>()).add(column);
+            }
+        }
+        List<String> lines = new ArrayList<>();
+        for (Map.Entry<String, Set<String>> e : columnsByTable.entrySet()) {
+            Optional<SchemaDoc> doc = schemaSource.byTable(e.getKey());
+            if (doc.isEmpty()) {
+                continue;
+            }
+            List<String> colLines = schemaColumnLines(doc.get(), e.getValue());
+            if (colLines.isEmpty()) {
+                continue;
+            }
+            String comment = doc.get().tableComment();
+            lines.add(e.getKey() + (comment != null && !comment.isBlank()
+                    ? " — " + comment.trim() : ""));
+            lines.addAll(colLines);
+        }
+        if (lines.isEmpty()) {
+            return null;
+        }
+        List<String> parts = new ArrayList<>();
+        parts.add("데이터 컬럼의 의미:");
+        parts.addAll(lines);
+        return String.join("\n", parts);
+    }
+
+    /** {@code - SNSR_VAL: 센서 측정값.} — 설명이 없는 컬럼은 조용히 빠진다(지어낼 게 없다). */
+    private static List<String> schemaColumnLines(SchemaDoc doc, Set<String> columns) {
+        List<String> out = new ArrayList<>();
+        Map<String, String> descs = doc.columnDescs() != null ? doc.columnDescs() : Map.of();
+        for (String column : columns) {
+            String desc = descs.get(column);
+            if (desc != null && !desc.isBlank()) {
+                out.add("- " + column + ": " + desc.trim());
+            }
+        }
+        return out;
     }
 
     // ── 공용 ────────────────────────────────────────────────────────────────

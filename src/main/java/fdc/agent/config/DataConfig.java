@@ -6,6 +6,8 @@ import fdc.agent.llm.MockLlm;
 import fdc.agent.llm.OpenAiLlm;
 import fdc.agent.lines.AkgLineSource;
 import fdc.agent.lines.LineSource;
+import fdc.agent.schema.AkgSchemaSource;
+import fdc.agent.schema.SchemaSource;
 import fdc.agent.skills.AkgSkillSource;
 import fdc.agent.skills.SkillQuery;
 import fdc.agent.skills.SkillRegistry;
@@ -63,6 +65,19 @@ public class DataConfig {
         return !props.isRestricted() && akg.isConfigured()
                 ? new AkgLineSource(akg.url(), akg.token(), akg.refreshSeconds())
                 : List::of;
+    }
+
+    /**
+     * 컬럼 의미 출처 seam — 스킬과 같은 스위치를 탄다(이슈 #49). 미설정/제한망이면
+     * {@link SchemaSource#NONE}: BE 는 컬럼 의미를 지어내지 않고, 서술 프롬프트에는
+     * 발췌 절이 그냥 안 생긴다.
+     */
+    @Bean
+    public SchemaSource schemaSource(AppProps props) {
+        AppProps.Akg akg = props.akg();
+        return !props.isRestricted() && akg.isConfigured()
+                ? new AkgSchemaSource(akg.url(), akg.token(), akg.refreshSeconds())
+                : SchemaSource.NONE;
     }
 
     @Bean
