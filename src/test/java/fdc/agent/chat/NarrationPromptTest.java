@@ -10,11 +10,14 @@ import fdc.agent.contract.QueryScope;
 import fdc.agent.contract.Role;
 import fdc.agent.contract.SnapshotIndexEntry;
 import fdc.agent.llm.LlmTypes.LlmMessage;
+import fdc.agent.schema.SchemaDoc;
+import fdc.agent.schema.SchemaSource;
 import fdc.agent.skills.NeedsResolver;
 import fdc.agent.skills.QueryPool;
 import fdc.agent.skills.SkillSpec;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -162,7 +165,8 @@ class NarrationPromptTest {
                 new HistoryMessage(Role.USER, "412086 설명해줘"),
                 new HistoryMessage(Role.ASSISTANT, "데이터가 도착하면 이어서 설명하겠습니다."));
 
-        List<LlmMessage> m = NarrationPrompt.messages(history, scope(), spec(), narration());
+        List<LlmMessage> m =
+                NarrationPrompt.messages(history, scope(), spec(), narration(), SchemaSource.NONE);
 
         assertThat(m).hasSize(13);
         assertThat(m.get(0).role()).isEqualTo(Role.SYSTEM);
@@ -193,7 +197,8 @@ class NarrationPromptTest {
 
     @Test
     void act_인자는_needs_와_렌더된_SQL_이고_못_여는_need_는_blocked_로_실린다() {
-        List<LlmMessage> m = NarrationPrompt.messages(List.of(), scope(), spec(), narration());
+        List<LlmMessage> m = NarrationPrompt.messages(
+                List.of(), scope(), spec(), narration(), SchemaSource.NONE);
 
         // 이력이 없으므로 [0]정체성 [1]계획 [2]조달계획 [3]act1 [4]도착1 [5]가교 [6]act2 …
         Map<String, Object> first = m.get(3).toolCalls().get(0).arguments();
@@ -212,7 +217,8 @@ class NarrationPromptTest {
 
     @Test
     void 도착_데이터는_tool_메시지에_source_와_함께_전량_실린다() {
-        List<LlmMessage> m = NarrationPrompt.messages(List.of(), scope(), spec(), narration());
+        List<LlmMessage> m = NarrationPrompt.messages(
+                List.of(), scope(), spec(), narration(), SchemaSource.NONE);
 
         assertThat(m.get(4).content()).isEqualTo("{\"arrived\":[{\"source\":\"sensor_row\","
                 + "\"table\":\"fdc_sensor\","
@@ -231,7 +237,8 @@ class NarrationPromptTest {
                 List.of(arrival(queries().get(0), many, SENSOR_COLUMNS)),
                 resolve(ALL_FILLED));
 
-        List<LlmMessage> m = NarrationPrompt.messages(List.of(), null, spec(), n);
+        List<LlmMessage> m =
+                NarrationPrompt.messages(List.of(), null, spec(), n, SchemaSource.NONE);
         assertThat(m.get(4).content()).contains("S-0").contains("S-22");
     }
 
@@ -296,7 +303,7 @@ class NarrationPromptTest {
 
     @Test
     void 서술_규칙은_지어내지_말_것과_하지_말_것뿐이다() {
-        String rules = NarrationPrompt.narrationRules(spec());
+        String rules = NarrationPrompt.narrationRules(spec(), null);
 
         assertThat(rules).isEqualTo(NarrationPrompt.NO_INVENTION
                 + "\n\n하지 말 것:\n- 비활성 '사유'를 추측한다 — 사유 컬럼은 데이터에 없다");
@@ -305,9 +312,49 @@ class NarrationPromptTest {
     }
 
     @Test
+    void 서술_규칙_뒤에_컬럼_의미_발췌가_붙는다() {
+        String rules = NarrationPrompt.narrationRules(null, "데이터 컬럼의 의미:\n- SNSR_VAL: 센서 측정값.");
+
+        assertThat(rules).isEqualTo(NarrationPrompt.NO_INVENTION
+                + "\n\n데이터 컬럼의 의미:\n- SNSR_VAL: 센서 측정값.");
+    }
+
+    @Test
+    void 발췌는_도착한_컬럼과_테이블이_겹치는_문서만_싣는다() {
+        SchemaSource source = byTable(Map.of(
+                "fdc_sensor", new SchemaDoc("fdc_sensor", "센서 마스터", Map.of(
+                        "SNSR_TYPE_CD", "센서 종류 코드.",
+                        "UNUSED_COL", "이 응답에 안 실린 컬럼 — 절대 안 나와야 한다.")),
+                "fdc_equipment", new SchemaDoc("fdc_equipment", null, Map.of(
+                        "EQP_NAME", "설비 이름."))));
+
+        List<LlmMessage> m = NarrationPrompt.messages(
+                List.of(), scope(), spec(), narration(), source);
+        String rules = m.get(m.size() - 2).content();
+
+        assertThat(rules).contains("데이터 컬럼의 의미:");
+        assertThat(rules).contains("fdc_sensor — 센서 마스터");
+        assertThat(rules).contains("- SNSR_TYPE_CD: 센서 종류 코드.");
+        assertThat(rules).contains("fdc_equipment");
+        assertThat(rules).contains("- EQP_NAME: 설비 이름.");
+        // 도착 데이터에 없는 컬럼의 설명은 절대 섞여 들어가지 않는다.
+        assertThat(rules).doesNotContain("UNUSED_COL");
+    }
+
+    @Test
+    void schemaSource가_비었으면_발췌_절_자체가_없다() {
+        List<LlmMessage> m = NarrationPrompt.messages(
+                List.of(), scope(), spec(), narration(), SchemaSource.NONE);
+        String rules = m.get(m.size() - 2).content();
+
+        assertThat(rules).doesNotContain("데이터 컬럼의 의미");
+    }
+
+    @Test
     void spec_이_없어도_계획과_판정은_나온다() {
         // 답의 바닥은 spec 이 아니라 needs 판정이다 — spec 이 어긋나도 그건 남는다.
-        List<LlmMessage> m = NarrationPrompt.messages(List.of(), scope(), null, narration());
+        List<LlmMessage> m = NarrationPrompt.messages(
+                List.of(), scope(), null, narration(), SchemaSource.NONE);
 
         assertThat(m.get(1).content()).contains("- 센서 정체·상태").contains("- 소속 설비");
         assertThat(m.get(1).content()).doesNotContain("이 질문에 답한다는 건");
@@ -319,6 +366,21 @@ class NarrationPromptTest {
     void scope_가_없으면_run_정체로_분석_대상을_적는다() {
         assertThat(NarrationPrompt.planTurn(null, spec(), narration()))
                 .startsWith("분석 대상 — fdc-explain-sensor (fdc-explain-sensor; snsr_id=412086).");
+    }
+
+    /** 고정된 테이블→문서 맵으로 답하는 스텁 — akg 왕복 없이 {@link SchemaSource} 를 흉내낸다. */
+    private static SchemaSource byTable(Map<String, SchemaDoc> docs) {
+        return new SchemaSource() {
+            @Override
+            public Optional<SchemaDoc> byTable(String table) {
+                return Optional.ofNullable(docs.get(table));
+            }
+
+            @Override
+            public int size() {
+                return docs.size();
+            }
+        };
     }
 
     private static SkillSpec withNeeds(List<SkillSpec.SkillNeed> needs) {

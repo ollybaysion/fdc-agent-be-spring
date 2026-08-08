@@ -3,6 +3,7 @@ package fdc.agent.api;
 import fdc.agent.akg.AkgSource;
 import fdc.agent.akg.AkgSource.Reload;
 import fdc.agent.lines.LineSource;
+import fdc.agent.schema.SchemaSource;
 import fdc.agent.skills.SkillSource;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -11,7 +12,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * POST /admin/reload — akg 소스(스킬·라인) 강제 리로드(#40). 운영(ops) 표면이라
+ * POST /admin/reload — akg 소스(스킬·라인·스키마) 강제 리로드(#40). 운영(ops) 표면이라
  * 제품 문법({@code /api/fdc/v1/*}) 밖, {@code /health} 와 같은 층이다.
  *
  * <p>주기 refresh(AKG_REFRESH_SECONDS, 기본 300초)가 반영 상한이던 것을 즉시로 —
@@ -30,10 +31,13 @@ public class AdminController {
 
     private final SkillSource skillSource;
     private final LineSource lineSource;
+    private final SchemaSource schemaSource;
 
-    public AdminController(SkillSource skillSource, LineSource lineSource) {
+    public AdminController(
+            SkillSource skillSource, LineSource lineSource, SchemaSource schemaSource) {
         this.skillSource = skillSource;
         this.lineSource = lineSource;
+        this.schemaSource = schemaSource;
     }
 
     @PostMapping("/admin/reload")
@@ -41,6 +45,7 @@ public class AdminController {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("skills", section(skillSource, "bundle", () -> skillSource.specs().size()));
         out.put("lines", section(lineSource, "none", () -> lineSource.codes().size()));
+        out.put("schema", section(schemaSource, "none", schemaSource::size));
         return out;
     }
 
