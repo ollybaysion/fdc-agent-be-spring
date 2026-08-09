@@ -24,12 +24,15 @@ import org.springframework.test.web.servlet.MockMvc;
 class ChatDataMessageTest {
 
     private static final String DUMP =
-            "LotProcessResult{eqpId=CVD-01, lotId=LOT-24135, "
+            "LotProcessResult{eqpId=CVD-01, eventTime=2026-08-08T11:58:03.412765, "
+                    + "lotId=LOT-24135, "
                     + "recipe=RecipeInfo{recipeId=R-88, version=3}, "
                     + "steps=[StepResult{stepNo=1, status=OK}]}";
 
     @Autowired
     private MockMvc mvc;
+
+    private String body;
 
     private JsonNode done(String json) throws Exception {
         MockHttpServletResponse res = mvc.perform(post("/api/fdc/v1/chat/data")
@@ -37,7 +40,8 @@ class ChatDataMessageTest {
                         .content(json))
                 .andReturn().getResponse();
         assertThat(res.getStatus()).isEqualTo(200);
-        return SseTestSupport.donePayload(res.getContentAsString(StandardCharsets.UTF_8));
+        body = res.getContentAsString(StandardCharsets.UTF_8);
+        return SseTestSupport.donePayload(body);
     }
 
     @Test
@@ -54,8 +58,39 @@ class ChatDataMessageTest {
         assertThat(fm.path("eqpId").asText()).isEqualTo("CVD-01");
         assertThat(fm.path("className").asText()).isEqualTo("LotProcessResult");
         assertThat(fm.path("comment").asText()).isNotEmpty();
+        // 다건 목록이 이 두 필드로 이름 붙이고 줄을 세운다.
+        assertThat(fm.path("title").asText()).isEqualTo("LOT-24135");
+        assertThat(fm.path("occurredAt").asText()).isEqualTo("2026-08-08T11:58:03.412765");
+        // 한 건이어도 배열로 온다 — 단수 필드는 배열을 아직 안 읽는 FE 를 위한 호환이다.
+        assertThat(done.path("formattedMessages").size()).isEqualTo(1);
         // 메시지 왕복은 패널 판정이 아니다 — 원장을 싣지 않는다(FE 도 replace 안 함).
         assertThat(done.has("dataRequests")).isFalse();
+    }
+
+    @Test
+    void 로그_백_줄은_낱개로_잘려_배열로_온다() throws Exception {
+        StringBuilder log = new StringBuilder();
+        for (int i = 0; i < 100; i++) {
+            log.append("2026-08-08 11:%02d:%02d.100200 INFO AlarmEvent{eqpId=ETCH-02, alarmId=AL-%d}"
+                    .formatted(i / 60, i % 60, 200 + i)).append('\n');
+        }
+        JsonNode done = done(new ObjectMapper().writeValueAsString(
+                java.util.Map.of("eventId", "e4", "revision", 1, "pasted", log.toString())));
+
+        JsonNode all = done.path("formattedMessages");
+        assertThat(all.size()).isEqualTo(100);
+        assertThat(all.get(0).path("eqpId").asText()).isEqualTo("ETCH-02");
+        // 원문 조각이 건마다 실린다 — 자른 건 BE 라 FE 는 되짚을 수 없다.
+        assertThat(all.get(0).path("raw").asText()).contains("AL-200");
+        assertThat(all.get(99).path("raw").asText()).contains("AL-299");
+        // 단수 필드는 한 건일 때만 — 100건 응답에 끼면 FE 가 첫 건만 등록한다.
+        assertThat(done.has("formattedMessage")).isFalse();
+
+        // 진행이 done 보다 먼저 흐른다 — 총량을 먼저 알리고, 묶음마다 한 줄씩.
+        assertThat(body.indexOf("event: progress")).isLessThan(body.indexOf("event: done"));
+        assertThat(body).contains("\"total\":100").contains("\"done\":0");
+        // 10건씩 열 번 + 총량 한 번.
+        assertThat(body.split("event: progress", -1).length - 1).isEqualTo(11);
     }
 
     @Test

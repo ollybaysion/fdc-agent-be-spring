@@ -17,8 +17,13 @@ import java.util.List;
  * (akg 주기 refresh) 같은 body 가 다른 판정일 수 있음을 FE 가 감지한다(T14).
  * {@code narratedRun} 은 이 응답의 token 스트림이 어느 절차의 종결 서술인지다.
  *
- * <p>{@code formattedMessage} 는 메시지 판정 왕복({@code pasted} 실림, #64)에만
- * 실린다 — 있으면 FE 는 메시지 카드를 세우고, 없으면 로컬 표 파싱으로 폴백한다.
+ * <p>{@code formattedMessages} 는 메시지 판정 왕복({@code pasted} 실림, #64)에만
+ * 실린다 — 붙여넣기 하나가 여러 건일 수 있어 <b>배열</b>이고, 자른 순서 그대로다.
+ * 변환에 실패한 조각도 원문(`raw`)만 달고 자리를 지킨다. 비어 있으면 메시지가
+ * 아니었다는 뜻이라 FE 는 로컬 표 파싱으로 폴백한다.
+ *
+ * <p>{@code formattedMessage}(단수)는 한 건일 때만 함께 실리는 호환 필드다 —
+ * 배열을 읽기 전의 FE 가 그대로 동작하게. FE 가 배열을 읽게 되면 사라진다.
  */
 public record ChatDataDone(
         String messageId,
@@ -29,5 +34,6 @@ public record ChatDataDone(
         @JsonInclude(JsonInclude.Include.NON_NULL) List<RunProgress> runsProgress,
         @JsonInclude(JsonInclude.Include.NON_NULL) List<String> terminalRuns,
         @JsonInclude(JsonInclude.Include.NON_NULL) String narratedRun,
-        @JsonInclude(JsonInclude.Include.NON_NULL) FormattedMessage formattedMessage) {
+        @JsonInclude(JsonInclude.Include.NON_NULL) FormattedMessage formattedMessage,
+        @JsonInclude(JsonInclude.Include.NON_NULL) List<FormattedMessage> formattedMessages) {
 }

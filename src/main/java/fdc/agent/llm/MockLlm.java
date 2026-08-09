@@ -368,18 +368,49 @@ public class MockLlm implements LlmClient {
      * 메시지 포맷팅 프롬프트 → 계약 JSON. 실 모델은 중첩까지 구조화하지만, 목은
      * <b>최상위 {@code k=v} 만</b> 평탄 분해한다(중첩 객체·리스트는 문자열 그대로) —
      * 결정론 파서를 들이지 않기로 한 MVP 결정(#64 결정 8)을 목이 앞지르면 안 된다.
+     *
+     * <p>{@code title}·{@code occurredAt} 도 같은 규율로 <b>최상위에서만</b> 줍는다:
+     * 시각은 타임스탬프 모양의 첫 값, 제목은 eqpId 가 아닌 첫 식별 값이다. 목의 이
+     * 규칙은 실 모델의 판단을 흉내 내는 게 아니라, 다건 화면을 목만으로 돌려볼 수
+     * 있게 하는 최소한이다.
      */
     static String messageFormatAnswer(String prompt) {
-        int at = prompt.lastIndexOf("원문:");
-        String raw = at >= 0 ? prompt.substring(at + "원문:".length()).trim() : prompt.trim();
+        StringBuilder out = new StringBuilder("[");
+        Matcher mark = Pattern.compile("<<<MSG (\\d+)>>>").matcher(prompt);
+        int count = 0;
+        int at = -1;
+        int index = -1;
+        while (mark.find()) {
+            if (at >= 0) {
+                out.append(count++ > 0 ? "," : "")
+                        .append(oneMessage(index, prompt.substring(at, mark.start())));
+            }
+            index = Integer.parseInt(mark.group(1));
+            at = mark.end();
+        }
+        if (at >= 0) {
+            out.append(count > 0 ? "," : "").append(oneMessage(index, prompt.substring(at)));
+        }
+        return out.append(']').toString();
+    }
+
+    /** 조각 하나 → 배열 원소. 번호는 프롬프트가 붙인 것을 그대로 돌려준다. */
+    private static String oneMessage(int index, String chunk) {
+        String raw = chunk.trim();
+        // 로그 줄이면 덤프가 줄 가운데 박혀 있다 — 그 덩어리만 떼어 같은 규칙으로 읽고,
+        // 줄 머리의 타임스탬프는 발생 시각 후보로 남긴다.
         Matcher shape = Pattern
-                .compile("^([A-Za-z_$][A-Za-z0-9_$.]*)\\s*\\{([\\s\\S]*)}$")
+                .compile("([A-Za-z_$][A-Za-z0-9_$.]*)\\s*\\{([\\s\\S]*)}")
                 .matcher(raw);
         StringBuilder json = new StringBuilder("{");
         String className = null;
         String eqpId = null;
+        String occurredAt = null;
+        String title = null;
         int count = 0;
-        if (shape.matches()) {
+        Matcher head = TIMESTAMP.matcher(raw);
+        String headTime = head.lookingAt() ? head.group() : null;
+        if (shape.find()) {
             className = shape.group(1);
             for (Map.Entry<String, String> e : topLevelPairs(shape.group(2)).entrySet()) {
                 if (count > 0) {
@@ -389,6 +420,13 @@ public class MockLlm implements LlmClient {
                         .append(jsonEscape(e.getValue())).append('"');
                 if (e.getKey().equalsIgnoreCase("eqpId")) {
                     eqpId = e.getValue();
+                } else {
+                    if (occurredAt == null && TIMESTAMP.matcher(e.getValue()).matches()) {
+                        occurredAt = e.getValue();
+                    }
+                    if (title == null && IDENT_KEY.matcher(e.getKey()).matches()) {
+                        title = e.getValue();
+                    }
                 }
                 count++;
             }
@@ -396,7 +434,12 @@ public class MockLlm implements LlmClient {
             json.append("\"raw\":\"").append(jsonEscape(raw)).append('"');
         }
         json.append('}');
-        StringBuilder out = new StringBuilder("{\"json\":").append(json);
+        // 메시지 안의 시각 필드가 먼저다 — 줄 머리의 로그 시각은 그것이 없을 때만.
+        if (occurredAt == null) {
+            occurredAt = headTime;
+        }
+        StringBuilder out = new StringBuilder("{\"index\":").append(index);
+        out.append(",\"json\":").append(json);
         out.append(",\"comment\":\"(mock) ")
                 .append(jsonEscape(className != null ? className : "메시지"))
                 .append(" — 최상위 필드 ").append(count).append("개를 평탄 분해했습니다.\"");
@@ -406,8 +449,24 @@ public class MockLlm implements LlmClient {
         if (className != null) {
             out.append(",\"className\":\"").append(jsonEscape(className)).append('"');
         }
+        String label = title != null ? title : className;
+        if (label != null) {
+            out.append(",\"title\":\"").append(jsonEscape(label)).append('"');
+        }
+        if (occurredAt != null) {
+            out.append(",\"occurredAt\":\"").append(jsonEscape(occurredAt)).append('"');
+        }
         return out.append('}').toString();
     }
+
+    /** 타임스탬프 모양 — 목이 {@code occurredAt} 후보를 값만 보고 고르는 자(키 추측 없음). */
+    private static final Pattern TIMESTAMP = Pattern.compile(
+            "\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,9})?)?"
+                    + "(Z|[+-]\\d{2}:?\\d{2})?");
+
+    /** 식별 필드 키 — 목의 제목 후보. */
+    private static final Pattern IDENT_KEY =
+            Pattern.compile("(?i).*(id|code|no|name)");
 
     /** 중괄호·대괄호 깊이 0 의 콤마로만 자른 {@code k=v} 쌍들 — 순서 보존. */
     private static Map<String, String> topLevelPairs(String inner) {
