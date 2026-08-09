@@ -9,6 +9,7 @@ import fdc.agent.contract.ChatDataSnapshot;
 import fdc.agent.contract.ChatImage;
 import fdc.agent.contract.ChatLink;
 import fdc.agent.contract.ChatTable;
+import fdc.agent.contract.ChoiceRequest;
 import fdc.agent.contract.DataRequest;
 import fdc.agent.contract.FinishReason;
 import fdc.agent.contract.InputRequest;
@@ -79,19 +80,21 @@ public class ChatAgent {
      * finishReason: "stop" | "length". recommendQuestion 은 실패/미지원 시 빈 배열.
      * dataRequests 는 이 응답에서 조달을 요청한 데이터(없으면 빈 배열).
      * inputRequests 는 이 응답에서 입력 카드로 요청한 스칼라 값(없으면 빈 배열).
+     * choiceRequests 는 이 응답에서 선택 카드로 제시한 선택지(없으면 빈 배열).
      */
     public record AgentResult(
             String text, List<ChatTable> tables, FinishReason finishReason,
             List<String> recommendQuestion, List<DataRequest> dataRequests,
-            List<InputRequest> inputRequests, List<ChatImage> images, List<ChatLink> links) {
+            List<InputRequest> inputRequests, List<ChoiceRequest> choiceRequests,
+            List<ChatImage> images, List<ChatLink> links) {
 
         /** 그림·링크를 내놓는 툴이 아직 없는 경로용 — 나머지는 그대로. */
         public AgentResult(
                 String text, List<ChatTable> tables, FinishReason finishReason,
                 List<String> recommendQuestion, List<DataRequest> dataRequests,
-                List<InputRequest> inputRequests) {
+                List<InputRequest> inputRequests, List<ChoiceRequest> choiceRequests) {
             this(text, tables, finishReason, recommendQuestion, dataRequests,
-                    inputRequests, List.of(), List.of());
+                    inputRequests, choiceRequests, List.of(), List.of());
         }
     }
 
@@ -168,6 +171,7 @@ public class ChatAgent {
         // 프롬프트에 남으면, 못 부를 툴을 쓰라고 지시하는 꼴이 된다.
         RetrieveDataTool dataRequests = pool.isEmpty() ? null : new RetrieveDataTool(pool, progress);
         InputRequestTool inputRequests = new InputRequestTool(providedInputs, scope);
+        ChoiceRequestTool choiceRequests = new ChoiceRequestTool();
 
         List<AgentTool> tools = new ArrayList<>(SkillRegistry.compile(skillSpecs, skillQuery));
         if (snapshotDb != null) {
@@ -177,6 +181,7 @@ public class ChatAgent {
             tools.add(dataRequests);
         }
         tools.add(inputRequests);
+        tools.add(choiceRequests);
 
         Map<String, AgentTool> toolByName = new LinkedHashMap<>();
         tools.forEach(t -> toolByName.put(t.name(), t));
@@ -204,7 +209,8 @@ public class ChatAgent {
             if (turn instanceof LlmTurn.Final fin) {
                 return new AgentResult(fin.content(), tables, FinishReason.STOP,
                         suggestFollowups(messages, fin.content()),
-                        collectedRequests(dataRequests), inputRequests.collected());
+                        collectedRequests(dataRequests), inputRequests.collected(),
+                        choiceRequests.collected());
             }
 
             List<LlmToolCall> toolCalls = ((LlmTurn.ToolCalls) turn).toolCalls();
@@ -225,7 +231,7 @@ public class ChatAgent {
         // 스텝 한도 초과. 마지막 툴 요약을 그대로 돌려주면 스킬의 [출력 지침]·[하지 말 것]
         // 같은 내부 지시문이 화면에 그대로 나가므로, 모아 둔 표·카드만 들려 보낸다.
         return new AgentResult(OUT_OF_STEPS, tables, FinishReason.LENGTH, List.of(),
-                collectedRequests(dataRequests), inputRequests.collected());
+                collectedRequests(dataRequests), inputRequests.collected(), choiceRequests.collected());
     }
 
     /** 조달 요청 — 풀이 비어 툴이 안 붙은 요청에서는 애초에 모일 것이 없다. */

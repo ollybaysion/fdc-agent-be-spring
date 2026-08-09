@@ -205,4 +205,37 @@ class ChatAgentApiTest {
         // 이미 제공됐으므로 입력 카드가 나가지 않는다(필드 생략).
         assertThat(done.has("inputRequests")).isFalse();
     }
+
+    @Test
+    void 질문에_센서가_둘_이상이면_done에_choiceRequests로_선택_카드가_나간다() throws Exception {
+        // 후보를 2개 이상으로 좁혔을 때(여기서는 mock 이 질문 속 서로 다른 센서 ID 를
+        // 후보로 본다) choice_request 가 done.choiceRequests 로 나간다(#53).
+        MockHttpServletResponse res = chat("S-0004 S-0005 중 어디를 볼까요?");
+        assertThat(res.getStatus()).isEqualTo(200);
+        String body = res.getContentAsString(StandardCharsets.UTF_8);
+
+        JsonNode done = SseTestSupport.donePayload(body);
+        assertThat(done).isNotNull();
+        assertThat(done.path("choiceRequests").isArray()).isTrue();
+
+        JsonNode req = done.path("choiceRequests").get(0);
+        assertThat(req.path("question").asText()).isEqualTo("어느 센서를 분석할까요?");
+        assertThat(req.path("multiSelect").asBoolean()).isTrue();
+
+        List<String> labels = new ArrayList<>();
+        req.path("options").forEach(o -> labels.add(o.path("label").asText()));
+        assertThat(labels).containsExactly("S-0004", "S-0005");
+
+        assertThat(SseTestSupport.tokenText(body)).contains("선택지를 제시했습니다");
+    }
+
+    @Test
+    void 선택_요청이_없으면_done에_choiceRequests가_없다() throws Exception {
+        MockHttpServletResponse res = chat("안녕하세요");
+        assertThat(res.getStatus()).isEqualTo(200);
+
+        JsonNode done = SseTestSupport.donePayload(res.getContentAsString(StandardCharsets.UTF_8));
+        assertThat(done).isNotNull();
+        assertThat(done.has("choiceRequests")).isFalse();
+    }
 }

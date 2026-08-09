@@ -451,6 +451,7 @@ details.rawbox pre {
     <summary>개정 로그</summary>
     <ul>
       <li><b>v0.1</b> (2026-07-30) — 최초 작성. 컨트롤러 4종 + chat 계약(스냅샷 세 상태·queryKey·SSE) 코드 기준 정리.</li>
+      <li><b>v0.2</b> (2026-08-09) — done 페이로드에 <code>choiceRequests</code> 추가(#53). 회신은 구조화 필드가 아니라 카드 클릭이 만든 user 메시지다.</li>
     </ul>
   </details>
 </header>
@@ -685,6 +686,7 @@ data: {"message":"stream error"}</code></pre>
         <tr><td><code>recommendQuestion?</code></td><td><code>string[]</code></td><td>추천 후속 질문</td></tr>
         <tr><td><code>dataRequests?</code></td><td><code>{queryKey, label, sql?, columns?}[]</code></td><td>조달 요청 카드 — §6.4</td></tr>
         <tr><td><code>inputRequests?</code></td><td><code>{skill, key, label, description?}[]</code></td><td>스칼라 값 입력 카드. 회신은 <code>inputs[skill][key]</code></td></tr>
+        <tr><td><code>choiceRequests?</code></td><td><code>{question, options: {label, description?}[], multiSelect}[]</code></td><td>선택지 카드(#53). 회신은 구조화 필드 없이 클릭이 그대로 user 메시지("선택 — …")로 돌아온다</td></tr>
         <tr><td><code>images?</code></td><td><code>{label, dataUrl?, url?, alt?}[]</code></td><td>답에 딸린 그림 — 원격 주소·인라인 base64 둘 다</td></tr>
         <tr><td><code>links?</code></td><td><code>{label, url, description?}[]</code></td><td>답이 가리키는 바깥 문서</td></tr>
       </tbody>

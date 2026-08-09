@@ -16,6 +16,7 @@ public record ChatDonePayload(
         @JsonInclude(JsonInclude.Include.NON_NULL) List<String> recommendQuestion,
         @JsonInclude(JsonInclude.Include.NON_NULL) List<DataRequest> dataRequests,
         @JsonInclude(JsonInclude.Include.NON_NULL) List<InputRequest> inputRequests,
+        @JsonInclude(JsonInclude.Include.NON_NULL) List<ChoiceRequest> choiceRequests,
         @JsonInclude(JsonInclude.Include.NON_NULL) List<ChatImage> images,
         @JsonInclude(JsonInclude.Include.NON_NULL) List<ChatLink> links) {
 }

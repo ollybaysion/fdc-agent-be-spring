@@ -113,6 +113,7 @@ public class ChatController {
                 result.recommendQuestion().isEmpty() ? null : result.recommendQuestion(),
                 result.dataRequests().isEmpty() ? null : result.dataRequests(),
                 result.inputRequests().isEmpty() ? null : result.inputRequests(),
+                result.choiceRequests().isEmpty() ? null : result.choiceRequests(),
                 result.images().isEmpty() ? null : result.images(),
                 result.links().isEmpty() ? null : result.links());
 

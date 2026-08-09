@@ -27,6 +27,18 @@ final class ToolArgs {
         return s.isEmpty() ? null : s;
     }
 
+    /** 느슨한 boolean 인자 — {@code Boolean} 이거나 "true"(대소문자 무관)면 true. */
+    static boolean flag(Map<String, Object> args, String key) {
+        if (args == null) {
+            return false;
+        }
+        Object raw = args.get(key);
+        if (raw instanceof Boolean b) {
+            return b;
+        }
+        return raw != null && "true".equalsIgnoreCase(String.valueOf(raw));
+    }
+
     /** 문자열 배열 인자 — 비어 있거나 배열이 아니면 null. */
     static List<String> strings(Map<String, Object> args, String key) {
         if (args == null || !(args.get(key) instanceof List<?> raw)) {
@@ -128,6 +140,24 @@ final class ToolArgs {
         Map<String, Object> prop = new LinkedHashMap<>();
         prop.put("type", "array");
         prop.put("items", Map.of("type", "string"));
+        prop.put("description", description);
+        return prop;
+    }
+
+    /** boolean 프로퍼티 한 칸. */
+    static Map<String, Object> bool(String description) {
+        Map<String, Object> prop = new LinkedHashMap<>();
+        prop.put("type", "boolean");
+        prop.put("description", description);
+        return prop;
+    }
+
+    /** 객체 배열 프로퍼티 한 칸 — items 는 properties/required 로 조립한 하위 스키마. */
+    static Map<String, Object> objectArray(
+            String description, Map<String, Object> itemProperties, List<String> itemRequired) {
+        Map<String, Object> prop = new LinkedHashMap<>();
+        prop.put("type", "array");
+        prop.put("items", schema(itemProperties, itemRequired));
         prop.put("description", description);
         return prop;
     }

@@ -1,6 +1,7 @@
 package fdc.agent.llm;
 
 import fdc.agent.chat.ChatPrompt;
+import fdc.agent.chat.ChoiceRequestTool;
 import fdc.agent.chat.NarrationPrompt;
 import fdc.agent.chat.InputRequestTool;
 import fdc.agent.chat.RetrieveDataTool;
@@ -190,6 +191,20 @@ public class MockLlm implements LlmClient {
             }
         }
 
+        // 질문에 서로 다른 센서 ID 가 둘 이상 있으면 — 어느 것을 볼지 선택 카드로 묻는다
+        // (다중 선택이 자연스러운 사례를 흉내낸다). 실 모델이 "후보를 2~10개로 좁혔다"고
+        // 판단할 자리를, 목은 질문에 이미 여러 후보가 나열돼 있다는 신호로 흉내낸다.
+        List<String> sensors = distinctSensors(question);
+        if (sensors.size() >= 2 && has(tools, ChoiceRequestTool.NAME)) {
+            List<Map<String, String>> options = sensors.stream()
+                    .map(id -> Map.of("label", id))
+                    .toList();
+            return new LlmToolCall("call_1", ChoiceRequestTool.NAME, Map.of(
+                    "question", "어느 센서를 분석할까요?",
+                    "options", options,
+                    "multiSelect", true));
+        }
+
         // 센서 ID → snsr_id 파라미터를 요구하는 도메인 스킬 툴로(툴 이름 무관하게
         // 파라미터로 매칭 — 스킬이 늘어도 mock 무수정). 폼에 적힌 ID 도 주워야 하므로
         // 질문과 섹션을 함께 본다.
@@ -283,6 +298,19 @@ public class MockLlm implements LlmClient {
         Matcher m = JSON_PAIR.matcher(json);
         while (m.find()) {
             out.put(m.group(1), m.group(2));
+        }
+        return out;
+    }
+
+    /** 텍스트에 등장한 서로 다른 센서 ID — 등장 순서 그대로, 중복은 한 번만. */
+    private static List<String> distinctSensors(String text) {
+        List<String> out = new ArrayList<>();
+        Matcher m = SENSOR_RE.matcher(text);
+        while (m.find()) {
+            String id = m.group();
+            if (!out.contains(id)) {
+                out.add(id);
+            }
         }
         return out;
     }
