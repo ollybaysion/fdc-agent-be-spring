@@ -230,6 +230,19 @@ class ChatAgentApiTest {
     }
 
     @Test
+    void 선택_카드_회신_에코는_같은_선택_카드를_다시_내지_않는다() throws Exception {
+        // 회신("선택 — S-0004 / S-0005")도 센서 ID 를 그대로 담고 있어, 트리거가
+        // 그 문장 자체를 다시 보고 같은 카드를 내면 사용자가 답할 때마다 카드가
+        // 되돌아오는 루프가 된다(#53 회귀).
+        MockHttpServletResponse res = chat("선택 — S-0004 / S-0005");
+        assertThat(res.getStatus()).isEqualTo(200);
+
+        JsonNode done = SseTestSupport.donePayload(res.getContentAsString(StandardCharsets.UTF_8));
+        assertThat(done).isNotNull();
+        assertThat(done.has("choiceRequests")).isFalse();
+    }
+
+    @Test
     void 선택_요청이_없으면_done에_choiceRequests가_없다() throws Exception {
         MockHttpServletResponse res = chat("안녕하세요");
         assertThat(res.getStatus()).isEqualTo(200);

@@ -194,8 +194,11 @@ public class MockLlm implements LlmClient {
         // 질문에 서로 다른 센서 ID 가 둘 이상 있으면 — 어느 것을 볼지 선택 카드로 묻는다
         // (다중 선택이 자연스러운 사례를 흉내낸다). 실 모델이 "후보를 2~10개로 좁혔다"고
         // 판단할 자리를, 목은 질문에 이미 여러 후보가 나열돼 있다는 신호로 흉내낸다.
+        // 단, 그 카드의 회신("선택 — S-0004 / S-0005")도 센서 ID 를 그대로 담고 있으므로
+        // 회신 자체는 트리거에서 뺀다 — 안 그러면 답할 때마다 같은 카드가 되돌아온다.
         List<String> sensors = distinctSensors(question);
-        if (sensors.size() >= 2 && has(tools, ChoiceRequestTool.NAME)) {
+        if (sensors.size() >= 2 && has(tools, ChoiceRequestTool.NAME)
+                && !question.startsWith("선택 —")) {
             List<Map<String, String>> options = sensors.stream()
                     .map(id -> Map.of("label", id))
                     .toList();
