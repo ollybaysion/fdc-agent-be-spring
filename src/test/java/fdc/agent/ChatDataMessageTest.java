@@ -58,8 +58,30 @@ class ChatDataMessageTest {
         // 다건 목록이 이 두 필드로 이름 붙이고 줄을 세운다.
         assertThat(fm.path("title").asText()).isEqualTo("LOT-24135");
         assertThat(fm.path("occurredAt").asText()).isEqualTo("2026-08-08T11:58:03.412765");
+        // 한 건이어도 배열로 온다 — 단수 필드는 배열을 아직 안 읽는 FE 를 위한 호환이다.
+        assertThat(done.path("formattedMessages").size()).isEqualTo(1);
         // 메시지 왕복은 패널 판정이 아니다 — 원장을 싣지 않는다(FE 도 replace 안 함).
         assertThat(done.has("dataRequests")).isFalse();
+    }
+
+    @Test
+    void 로그_백_줄은_낱개로_잘려_배열로_온다() throws Exception {
+        StringBuilder log = new StringBuilder();
+        for (int i = 0; i < 100; i++) {
+            log.append("2026-08-08 11:%02d:%02d.100200 INFO AlarmEvent{eqpId=ETCH-02, alarmId=AL-%d}"
+                    .formatted(i / 60, i % 60, 200 + i)).append('\n');
+        }
+        JsonNode done = done(new ObjectMapper().writeValueAsString(
+                java.util.Map.of("eventId", "e4", "revision", 1, "pasted", log.toString())));
+
+        JsonNode all = done.path("formattedMessages");
+        assertThat(all.size()).isEqualTo(100);
+        assertThat(all.get(0).path("eqpId").asText()).isEqualTo("ETCH-02");
+        // 원문 조각이 건마다 실린다 — 자른 건 BE 라 FE 는 되짚을 수 없다.
+        assertThat(all.get(0).path("raw").asText()).contains("AL-200");
+        assertThat(all.get(99).path("raw").asText()).contains("AL-299");
+        // 단수 필드는 한 건일 때만 — 100건 응답에 끼면 FE 가 첫 건만 등록한다.
+        assertThat(done.has("formattedMessage")).isFalse();
     }
 
     @Test

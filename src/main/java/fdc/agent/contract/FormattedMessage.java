@@ -12,6 +12,11 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * <p>{@code json} 은 문자열이 아니라 객체다 — pretty-print 는 FE 소유.
  * {@code eqpId} 는 FE 가 설비 카드 배치에 쓰고, 없으면 미분류로 흘러간다.
  *
+ * <p>{@code raw} 는 이 한 건의 원문 조각이다 — 다건에서는 FE 가 무엇을 보냈는지로
+ * 되짚을 수 없다(자르는 건 BE 다). {@code json} 이 없으면 <b>변환 실패</b>고, 그때도
+ * 원문은 실려 온다: 100건 중 몇 건이 실패했다고 그 건이 화면에서 사라지면 사용자는
+ * 무엇이 빠졌는지 알 길이 없다.
+ *
  * <p>{@code title}·{@code occurredAt} 은 <b>다건</b>을 위한 필드다(#64 다중 메시지).
  * 한 건일 때는 없어도 화면이 성립하지만, 수십 건이 목록에 쌓이면 서로를 구별할
  * 이름과 줄 세울 시각이 없으면 고를 수가 없다. {@code occurredAt} 은 등록 시각이
@@ -19,11 +24,12 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * 소수초까지 원문 정밀도를 그대로 싣는다(FE 정렬이 그 자릿수에 의존한다).
  */
 public record FormattedMessage(
-        Object json,
+        @JsonInclude(JsonInclude.Include.NON_NULL) Object json,
         @JsonInclude(JsonInclude.Include.NON_NULL) String comment,
         @JsonInclude(JsonInclude.Include.NON_NULL) String eqpId,
         @JsonInclude(JsonInclude.Include.NON_NULL) String className,
         @JsonInclude(JsonInclude.Include.NON_NULL) String title,
         @JsonInclude(JsonInclude.Include.NON_NULL) String occurredAt,
+        @JsonInclude(JsonInclude.Include.NON_NULL) String raw,
         @JsonInclude(JsonInclude.Include.NON_NULL) String docId) {
 }

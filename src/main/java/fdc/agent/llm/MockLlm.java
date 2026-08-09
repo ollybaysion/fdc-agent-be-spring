@@ -375,10 +375,32 @@ public class MockLlm implements LlmClient {
      * 있게 하는 최소한이다.
      */
     static String messageFormatAnswer(String prompt) {
-        int at = prompt.lastIndexOf("원문:");
-        String raw = at >= 0 ? prompt.substring(at + "원문:".length()).trim() : prompt.trim();
+        StringBuilder out = new StringBuilder("[");
+        Matcher mark = Pattern.compile("<<<MSG (\\d+)>>>").matcher(prompt);
+        int count = 0;
+        int at = -1;
+        int index = -1;
+        while (mark.find()) {
+            if (at >= 0) {
+                out.append(count++ > 0 ? "," : "")
+                        .append(oneMessage(index, prompt.substring(at, mark.start())));
+            }
+            index = Integer.parseInt(mark.group(1));
+            at = mark.end();
+        }
+        if (at >= 0) {
+            out.append(count > 0 ? "," : "").append(oneMessage(index, prompt.substring(at)));
+        }
+        return out.append(']').toString();
+    }
+
+    /** 조각 하나 → 배열 원소. 번호는 프롬프트가 붙인 것을 그대로 돌려준다. */
+    private static String oneMessage(int index, String chunk) {
+        String raw = chunk.trim();
+        // 로그 줄이면 덤프가 줄 가운데 박혀 있다 — 그 덩어리만 떼어 같은 규칙으로 읽고,
+        // 줄 머리의 타임스탬프는 발생 시각 후보로 남긴다.
         Matcher shape = Pattern
-                .compile("^([A-Za-z_$][A-Za-z0-9_$.]*)\\s*\\{([\\s\\S]*)}$")
+                .compile("([A-Za-z_$][A-Za-z0-9_$.]*)\\s*\\{([\\s\\S]*)}")
                 .matcher(raw);
         StringBuilder json = new StringBuilder("{");
         String className = null;
@@ -386,7 +408,9 @@ public class MockLlm implements LlmClient {
         String occurredAt = null;
         String title = null;
         int count = 0;
-        if (shape.matches()) {
+        Matcher head = TIMESTAMP.matcher(raw);
+        String headTime = head.lookingAt() ? head.group() : null;
+        if (shape.find()) {
             className = shape.group(1);
             for (Map.Entry<String, String> e : topLevelPairs(shape.group(2)).entrySet()) {
                 if (count > 0) {
@@ -410,7 +434,12 @@ public class MockLlm implements LlmClient {
             json.append("\"raw\":\"").append(jsonEscape(raw)).append('"');
         }
         json.append('}');
-        StringBuilder out = new StringBuilder("{\"json\":").append(json);
+        // 메시지 안의 시각 필드가 먼저다 — 줄 머리의 로그 시각은 그것이 없을 때만.
+        if (occurredAt == null) {
+            occurredAt = headTime;
+        }
+        StringBuilder out = new StringBuilder("{\"index\":").append(index);
+        out.append(",\"json\":").append(json);
         out.append(",\"comment\":\"(mock) ")
                 .append(jsonEscape(className != null ? className : "메시지"))
                 .append(" — 최상위 필드 ").append(count).append("개를 평탄 분해했습니다.\"");

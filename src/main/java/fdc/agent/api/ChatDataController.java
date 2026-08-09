@@ -76,9 +76,9 @@ public class ChatDataController {
             return;
         }
 
-        // 메시지 판정 왕복(#64 MVP) — pasted 가 실리면 이 왕복은 패널 판정이
-        // 아니다. 스니프 → LLM 1회로 formattedMessage 만 답하고 끝낸다. 실패는
-        // formattedMessage 없는 done(불가침) — FE 는 로컬 표 파싱으로 폴백한다.
+        // 메시지 판정 왕복(#64) — pasted 가 실리면 이 왕복은 패널 판정이 아니다.
+        // 스니프 → 결정론 분할 → LLM 배치로 formattedMessages 만 답하고 끝낸다.
+        // 빈 목록이면 메시지가 아니었다는 뜻(불가침) — FE 는 표 파싱으로 폴백한다.
         if (body.pasted() != null && !body.pasted().isBlank()) {
             respondMessageJudge(body, res);
             return;
@@ -118,6 +118,7 @@ public class ChatDataController {
                 verdict.runsProgress(),
                 emptyToNull(verdict.terminalRuns()),
                 text != null ? verdict.narration().runLabel() : null,
+                null,
                 null);
 
         Map<String, Object> traceOut = new LinkedHashMap<>();
@@ -161,8 +162,12 @@ public class ChatDataController {
             in.put("pastedForce", body.pastedForce());
             Trace.emit("FE→BE 메시지 판정 POST /api/fdc/v1/chat/data (pasted)", in);
         }
-        FormattedMessage formatted =
-                MessageJudge.judge(llm, body.pasted(), Boolean.TRUE.equals(body.pastedForce()));
+        List<FormattedMessage> formatted =
+                MessageJudge.judgeAll(llm, body.pasted(), Boolean.TRUE.equals(body.pastedForce()));
+        // 단수 필드는 한 건이면서 변환까지 된 경우에만 — 변환 실패를 실어 보내면
+        // 배열을 아직 안 읽는 FE 가 json 없는 카드를 세우려다 넘어진다(폴백이 막힌다).
+        FormattedMessage single =
+                formatted.size() == 1 && formatted.get(0).json() != null ? formatted.get(0) : null;
         ChatDataDone done = new ChatDataDone(
                 "msg_" + Long.toString(System.currentTimeMillis(), 36),
                 body.eventId(),
@@ -172,8 +177,9 @@ public class ChatDataController {
                 null,
                 null,
                 null,
-                formatted);
-        Trace.emit("BE→FE 응답 (chat/data done, formattedMessage)", done);
+                single,
+                formatted.isEmpty() ? null : formatted);
+        Trace.emit("BE→FE 응답 (chat/data done, formattedMessages " + formatted.size() + "건)", done);
         SseSupport.sseHeaders(res);
         ServletOutputStream out = res.getOutputStream();
         SseSupport.write(out, SseSupport.sse("done", done));
