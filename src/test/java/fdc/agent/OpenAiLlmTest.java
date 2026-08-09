@@ -152,4 +152,29 @@ class OpenAiLlmTest {
         assertThat(titles).contains("sensor_row", "equipment_row");
         assertThat(result.tables().get(0).rows().get(0)).containsEntry("SNSR_ID", "S-0004");
     }
+
+    @Test
+    void 이미지_없는_메시지는_content가_문자열_그대로다() {
+        OpenAiLlm llm = new OpenAiLlm(baseUrl, "test-key", "onprem-x");
+        llm.next(List.of(LlmMessage.of(Role.USER, "그냥 텍스트")), List.of());
+
+        JsonNode content = lastSent().path("messages").get(0).path("content");
+        assertThat(content.isTextual()).isTrue();
+        assertThat(content.asText()).isEqualTo("그냥 텍스트");
+    }
+
+    @Test
+    void 이미지_있는_메시지는_content가_파트_배열이다() {
+        OpenAiLlm llm = new OpenAiLlm(baseUrl, "test-key", "onprem-x");
+        llm.next(List.of(LlmMessage.withImages(Role.USER, "이 화면 뭐야?",
+                List.of("data:image/png;base64,AAAA"))), List.of());
+
+        JsonNode content = lastSent().path("messages").get(0).path("content");
+        assertThat(content.isArray()).isTrue();
+        assertThat(content.get(0).path("type").asText()).isEqualTo("text");
+        assertThat(content.get(0).path("text").asText()).isEqualTo("이 화면 뭐야?");
+        assertThat(content.get(1).path("type").asText()).isEqualTo("image_url");
+        assertThat(content.get(1).path("image_url").path("url").asText())
+                .isEqualTo("data:image/png;base64,AAAA");
+    }
 }

@@ -4,6 +4,7 @@ import fdc.agent.akg.AkgSource;
 import fdc.agent.akg.AkgSource.Reload;
 import fdc.agent.lines.LineSource;
 import fdc.agent.schema.SchemaSource;
+import fdc.agent.screens.ScreenMapSource;
 import fdc.agent.skills.SkillSource;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -32,12 +33,14 @@ public class AdminController {
     private final SkillSource skillSource;
     private final LineSource lineSource;
     private final SchemaSource schemaSource;
+    private final ScreenMapSource screenMapSource;
 
-    public AdminController(
-            SkillSource skillSource, LineSource lineSource, SchemaSource schemaSource) {
+    public AdminController(SkillSource skillSource, LineSource lineSource,
+            SchemaSource schemaSource, ScreenMapSource screenMapSource) {
         this.skillSource = skillSource;
         this.lineSource = lineSource;
         this.schemaSource = schemaSource;
+        this.screenMapSource = screenMapSource;
     }
 
     @PostMapping("/admin/reload")
@@ -46,6 +49,7 @@ public class AdminController {
         out.put("skills", section(skillSource, "bundle", () -> skillSource.specs().size()));
         out.put("lines", section(lineSource, "none", () -> lineSource.codes().size()));
         out.put("schema", section(schemaSource, "none", schemaSource::size));
+        out.put("screens", section(screenMapSource, "bundle", () -> screenMapSource.maps().size()));
         return out;
     }
 

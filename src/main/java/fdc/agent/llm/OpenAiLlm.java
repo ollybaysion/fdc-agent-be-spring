@@ -203,7 +203,18 @@ public class OpenAiLlm implements LlmClient {
         }
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("role", m.role().wire());
-        out.put("content", m.content() != null ? m.content() : "");
+        if (m.images() != null && !m.images().isEmpty()) {
+            // OpenAI vision 형식 — [{"type":"text",...},{"type":"image_url",...}].
+            // GW 가 다른 형식을 쓰면 고칠 자리는 이 어댑터 한 곳뿐이다.
+            List<Map<String, Object>> parts = new ArrayList<>();
+            parts.add(Map.of("type", "text", "text", m.content() != null ? m.content() : ""));
+            for (String url : m.images()) {
+                parts.add(Map.of("type", "image_url", "image_url", Map.of("url", url)));
+            }
+            out.put("content", parts);
+        } else {
+            out.put("content", m.content() != null ? m.content() : "");
+        }
         return out;
     }
 

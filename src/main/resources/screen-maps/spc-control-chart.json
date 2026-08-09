@@ -1,0 +1,15 @@
+{
+  "id": "spc-control-chart",
+  "name": "관리도 조회",
+  "program": "SPC",
+  "menuPath": ["관리도"],
+  "hints": [
+    "Xbar-R 또는 개별값 관리도 형태의 차트가 중심이다",
+    "차트에 UCL/LCL 관리한계선이 수평으로 그려져 있다",
+    "공정능력지수(Cpk) 수치가 화면 어딘가에 표시된다"
+  ],
+  "expectedColumns": {
+    "required": ["측정시각", "측정값", "UCL", "LCL"],
+    "optional": ["Cpk", "서브그룹"]
+  }
+}

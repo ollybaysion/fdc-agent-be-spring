@@ -14,24 +14,34 @@ public final class LlmTypes {
     private LlmTypes() {
     }
 
-    /** OpenAI 호환 대화 메시지(툴 호출/결과 포함). content 는 툴만 호출 시 null. */
+    /**
+     * OpenAI 호환 대화 메시지(툴 호출/결과 포함). content 는 툴만 호출 시 null.
+     * {@code images}(data URL 등)가 실리면 {@code OpenAiLlm} 이 content 를 파트
+     * 배열로 바꿔 보낸다(#63 캡처 분류) — 없으면 기존 문자열 경로 그대로다.
+     */
     public record LlmMessage(
             Role role,
             String content,
             List<LlmToolCall> toolCalls,
             String toolCallId,
-            String name) {
+            String name,
+            List<String> images) {
 
         public static LlmMessage of(Role role, String content) {
-            return new LlmMessage(role, content, null, null, null);
+            return new LlmMessage(role, content, null, null, null, null);
         }
 
         public static LlmMessage assistantToolCalls(List<LlmToolCall> toolCalls) {
-            return new LlmMessage(Role.ASSISTANT, null, toolCalls, null, null);
+            return new LlmMessage(Role.ASSISTANT, null, toolCalls, null, null, null);
         }
 
         public static LlmMessage toolResult(String toolCallId, String name, String content) {
-            return new LlmMessage(Role.TOOL, content, null, toolCallId, name);
+            return new LlmMessage(Role.TOOL, content, null, toolCallId, name, null);
+        }
+
+        /** 이미지 파트를 실은 메시지 — vision 호출이 필요할 때(#63). */
+        public static LlmMessage withImages(Role role, String content, List<String> images) {
+            return new LlmMessage(role, content, null, null, null, images);
         }
     }
 
