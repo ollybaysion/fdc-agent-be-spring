@@ -47,6 +47,11 @@ public final class PanelJudge {
     /**
      * {@code POST /api/fdc/v1/chat/data} 요청 body (demo-fe #163 짝 계약,
      * 느슨하게 수용 — 빠진 필드는 null, 모르는 필드는 무시).
+     *
+     * <p>{@code pasted} 는 붙여넣기 원문이다(#64 메시지 MVP) — 실려 오면 이
+     * 왕복은 패널 판정이 아니라 <b>메시지 판정 전용</b>이고, 응답은
+     * {@code formattedMessage} 하나로 답한다. {@code pastedForce} 는 사용자가
+     * "이건 메시지다"라고 명시한 경우다 — 스니프를 건너뛰고 무조건 포맷팅한다.
      */
     public record PanelBody(
             String eventId,
@@ -57,7 +62,9 @@ public final class PanelJudge {
             List<ChatDataSnapshot> snapshots,
             List<RunDecl> runs,
             Map<String, Map<String, String>> inputs,
-            QueryScope scope) {
+            QueryScope scope,
+            String pasted,
+            Boolean pastedForce) {
     }
 
     /**

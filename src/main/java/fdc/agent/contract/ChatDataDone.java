@@ -16,14 +16,18 @@ import java.util.List;
  * 낡은 응답을 버리는 근거다(T7). {@code poolRev} 는 스킬 풀 지문 — 풀이 시변이라
  * (akg 주기 refresh) 같은 body 가 다른 판정일 수 있음을 FE 가 감지한다(T14).
  * {@code narratedRun} 은 이 응답의 token 스트림이 어느 절차의 종결 서술인지다.
+ *
+ * <p>{@code formattedMessage} 는 메시지 판정 왕복({@code pasted} 실림, #64)에만
+ * 실린다 — 있으면 FE 는 메시지 카드를 세우고, 없으면 로컬 표 파싱으로 폴백한다.
  */
 public record ChatDataDone(
         String messageId,
         @JsonInclude(JsonInclude.Include.NON_NULL) String eventId,
         @JsonInclude(JsonInclude.Include.NON_NULL) Integer revision,
-        String poolRev,
-        List<DataRequest> dataRequests,
-        List<RunProgress> runsProgress,
+        @JsonInclude(JsonInclude.Include.NON_NULL) String poolRev,
+        @JsonInclude(JsonInclude.Include.NON_NULL) List<DataRequest> dataRequests,
+        @JsonInclude(JsonInclude.Include.NON_NULL) List<RunProgress> runsProgress,
         @JsonInclude(JsonInclude.Include.NON_NULL) List<String> terminalRuns,
-        @JsonInclude(JsonInclude.Include.NON_NULL) String narratedRun) {
+        @JsonInclude(JsonInclude.Include.NON_NULL) String narratedRun,
+        @JsonInclude(JsonInclude.Include.NON_NULL) FormattedMessage formattedMessage) {
 }

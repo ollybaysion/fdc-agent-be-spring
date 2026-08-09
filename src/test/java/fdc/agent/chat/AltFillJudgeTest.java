@@ -64,7 +64,7 @@ class AltFillJudgeTest {
 
     private static PanelBody body(List<ChatDataSnapshot> snapshots) {
         return new PanelBody("e1", 1, null, null, null, snapshots,
-                List.of(new RunDecl("t-two-step", Map.of("id", "X-1"))), null, null);
+                List.of(new RunDecl("t-two-step", Map.of("id", "X-1"))), null, null, null, null);
     }
 
     /** 정해진 문장을 돌려주며 호출 횟수를 세는 fake. */

@@ -7,10 +7,12 @@ import fdc.agent.chat.PanelJudge;
 import fdc.agent.config.ApiException;
 import fdc.agent.config.AppProps;
 import fdc.agent.contract.ChatDataDone;
+import fdc.agent.contract.FormattedMessage;
 import fdc.agent.contract.QueryScope;
 import fdc.agent.llm.LlmTypes.LlmClient;
 import fdc.agent.llm.LlmTypes.LlmMessage;
 import fdc.agent.llm.LlmTypes.LlmTurn;
+import fdc.agent.msg.MessageJudge;
 import fdc.agent.schema.SchemaSource;
 import fdc.agent.skills.QueryPool;
 import fdc.agent.skills.SkillSource;
@@ -74,6 +76,14 @@ public class ChatDataController {
             return;
         }
 
+        // 메시지 판정 왕복(#64 MVP) — pasted 가 실리면 이 왕복은 패널 판정이
+        // 아니다. 스니프 → LLM 1회로 formattedMessage 만 답하고 끝낸다. 실패는
+        // formattedMessage 없는 done(불가침) — FE 는 로컬 표 파싱으로 폴백한다.
+        if (body.pasted() != null && !body.pasted().isBlank()) {
+            respondMessageJudge(body, res);
+            return;
+        }
+
         traceRequest(body, messages);
 
         List<SkillSpec> specs = skillSource.specs();
@@ -107,7 +117,8 @@ public class ChatDataController {
                 verdict.ledger(),
                 verdict.runsProgress(),
                 emptyToNull(verdict.terminalRuns()),
-                text != null ? verdict.narration().runLabel() : null);
+                text != null ? verdict.narration().runLabel() : null,
+                null);
 
         Map<String, Object> traceOut = new LinkedHashMap<>();
         traceOut.put("text", text);
@@ -134,6 +145,39 @@ public class ChatDataController {
         } finally {
             res.flushBuffer();
         }
+    }
+
+    /**
+     * 메시지 판정 왕복의 응답 — token 스트림 없이 done 하나. 원장(dataRequests)을
+     * 싣지 않는 이유는 이 왕복이 패널 상태 변경이 아니라서다: FE 도 이 응답으로
+     * 원장을 replace 하지 않는다.
+     */
+    private void respondMessageJudge(PanelJudge.PanelBody body, HttpServletResponse res)
+            throws IOException {
+        if (Trace.on()) {
+            Map<String, Object> in = new LinkedHashMap<>();
+            in.put("eventId", body.eventId());
+            in.put("pastedChars", body.pasted().length());
+            in.put("pastedForce", body.pastedForce());
+            Trace.emit("FE→BE 메시지 판정 POST /api/fdc/v1/chat/data (pasted)", in);
+        }
+        FormattedMessage formatted =
+                MessageJudge.judge(llm, body.pasted(), Boolean.TRUE.equals(body.pastedForce()));
+        ChatDataDone done = new ChatDataDone(
+                "msg_" + Long.toString(System.currentTimeMillis(), 36),
+                body.eventId(),
+                body.revision(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                formatted);
+        Trace.emit("BE→FE 응답 (chat/data done, formattedMessage)", done);
+        SseSupport.sseHeaders(res);
+        ServletOutputStream out = res.getOutputStream();
+        SseSupport.write(out, SseSupport.sse("done", done));
+        res.flushBuffer();
     }
 
     /**

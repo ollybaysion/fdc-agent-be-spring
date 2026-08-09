@@ -58,7 +58,7 @@ class PanelJudgeTest {
     private static PanelBody body(
             PanelEvent event, List<SnapshotIndexEntry> index, List<ChatDataSnapshot> snapshots,
             List<RunDecl> runs) {
-        return new PanelBody("e1", 1, event, null, index, snapshots, runs, null, null);
+        return new PanelBody("e1", 1, event, null, index, snapshots, runs, null, null, null, null);
     }
 
     private static List<RunDecl> declared() {
