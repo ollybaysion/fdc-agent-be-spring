@@ -32,13 +32,16 @@ class ChatDataMessageTest {
     @Autowired
     private MockMvc mvc;
 
+    private String body;
+
     private JsonNode done(String json) throws Exception {
         MockHttpServletResponse res = mvc.perform(post("/api/fdc/v1/chat/data")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json))
                 .andReturn().getResponse();
         assertThat(res.getStatus()).isEqualTo(200);
-        return SseTestSupport.donePayload(res.getContentAsString(StandardCharsets.UTF_8));
+        body = res.getContentAsString(StandardCharsets.UTF_8);
+        return SseTestSupport.donePayload(body);
     }
 
     @Test
@@ -82,6 +85,12 @@ class ChatDataMessageTest {
         assertThat(all.get(99).path("raw").asText()).contains("AL-299");
         // 단수 필드는 한 건일 때만 — 100건 응답에 끼면 FE 가 첫 건만 등록한다.
         assertThat(done.has("formattedMessage")).isFalse();
+
+        // 진행이 done 보다 먼저 흐른다 — 총량을 먼저 알리고, 묶음마다 한 줄씩.
+        assertThat(body.indexOf("event: progress")).isLessThan(body.indexOf("event: done"));
+        assertThat(body).contains("\"total\":100").contains("\"done\":0");
+        // 10건씩 열 번 + 총량 한 번.
+        assertThat(body.split("event: progress", -1).length - 1).isEqualTo(11);
     }
 
     @Test

@@ -101,10 +101,27 @@ public final class MessageJudge {
     }
 
     /**
+     * 진행 알림 — 묶음 하나가 끝날 때마다 불린다. 100건이면 열 번에 걸쳐 수십 초라,
+     * 다 끝나고 한꺼번에 답하면 화면이 죽은 것처럼 보인다. 분할 직후 {@code (0, n)}
+     * 으로 한 번 불러 총량을 먼저 알린다.
+     */
+    @FunctionalInterface
+    public interface Progress {
+        void at(int done, int total);
+    }
+
+    /**
      * 판정 + 포맷팅 — 조각 순서대로 전량을 돌려준다(변환 실패 조각도 원문은 실린다).
      * 후보가 아니거나 상한을 넘으면 빈 목록이다.
      */
     public static List<FormattedMessage> judgeAll(LlmClient llm, String pasted, boolean force) {
+        return judgeAll(llm, pasted, force, (done, total) -> {
+        });
+    }
+
+    /** 진행을 흘리며 판정 — SSE 로 중간 상태를 보내는 인렛이 쓴다. */
+    public static List<FormattedMessage> judgeAll(
+            LlmClient llm, String pasted, boolean force, Progress progress) {
         if (pasted == null || pasted.isBlank() || pasted.length() > PASTED_MAX_CHARS) {
             return List.of();
         }
@@ -118,7 +135,8 @@ public final class MessageJudge {
             return List.of();
         }
         FormattedMessage[] out = new FormattedMessage[chunks.size()];
-        formatRange(llm, chunks, indexesOf(chunks.size()), out, true);
+        progress.at(0, chunks.size());
+        formatRange(llm, chunks, indexesOf(chunks.size()), out, true, progress);
 
         List<FormattedMessage> result = new ArrayList<>(chunks.size());
         for (int i = 0; i < chunks.size(); i++) {
@@ -146,7 +164,7 @@ public final class MessageJudge {
      */
     private static void formatRange(
             LlmClient llm, List<String> chunks, List<Integer> want,
-            FormattedMessage[] out, boolean top) {
+            FormattedMessage[] out, boolean top, Progress progress) {
         if (want.isEmpty()) {
             return;
         }
@@ -154,16 +172,19 @@ public final class MessageJudge {
             for (int at = 0; at < want.size(); at += BATCH_SIZE) {
                 List<Integer> batch = want.subList(at, Math.min(at + BATCH_SIZE, want.size()));
                 askBatch(llm, chunks, batch, out);
-                retryMissing(llm, chunks, batch, out);
+                retryMissing(llm, chunks, batch, out, progress);
+                // 이 묶음까지의 진척 — 재시도로 늦어져도 끝난 만큼은 바로 알린다.
+                progress.at(Math.min(at + BATCH_SIZE, want.size()), chunks.size());
             }
             return;
         }
         askBatch(llm, chunks, want, out);
-        retryMissing(llm, chunks, want, out);
+        retryMissing(llm, chunks, want, out, progress);
     }
 
     private static void retryMissing(
-            LlmClient llm, List<String> chunks, List<Integer> batch, FormattedMessage[] out) {
+            LlmClient llm, List<String> chunks, List<Integer> batch,
+            FormattedMessage[] out, Progress progress) {
         List<Integer> missing = batch.stream().filter(i -> out[i] == null).toList();
         if (missing.isEmpty()) {
             return;
@@ -174,8 +195,8 @@ public final class MessageJudge {
             return;
         }
         int half = missing.size() / 2;
-        formatRange(llm, chunks, missing.subList(0, half), out, false);
-        formatRange(llm, chunks, missing.subList(half, missing.size()), out, false);
+        formatRange(llm, chunks, missing.subList(0, half), out, false, progress);
+        formatRange(llm, chunks, missing.subList(half, missing.size()), out, false, progress);
     }
 
     /** 묶음 하나를 LLM 에 묻고 받은 것만 채운다 — 못 받은 자리는 호출자가 다시 쪼갠다. */

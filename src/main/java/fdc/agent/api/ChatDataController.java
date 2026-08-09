@@ -162,8 +162,15 @@ public class ChatDataController {
             in.put("pastedForce", body.pastedForce());
             Trace.emit("FE→BE 메시지 판정 POST /api/fdc/v1/chat/data (pasted)", in);
         }
-        List<FormattedMessage> formatted =
-                MessageJudge.judgeAll(llm, body.pasted(), Boolean.TRUE.equals(body.pastedForce()));
+        // 진행을 흘리려면 헤더가 먼저다 — 100건이면 열 번에 걸쳐 수십 초라, 다 끝나고
+        // 한꺼번에 답하면 그동안 화면이 죽은 것처럼 보인다.
+        SseSupport.sseHeaders(res);
+        ServletOutputStream out = res.getOutputStream();
+        List<FormattedMessage> formatted = MessageJudge.judgeAll(
+                llm,
+                body.pasted(),
+                Boolean.TRUE.equals(body.pastedForce()),
+                (count, total) -> writeProgress(res, out, count, total));
         // 단수 필드는 한 건이면서 변환까지 된 경우에만 — 변환 실패를 실어 보내면
         // 배열을 아직 안 읽는 FE 가 json 없는 카드를 세우려다 넘어진다(폴백이 막힌다).
         FormattedMessage single =
@@ -180,10 +187,23 @@ public class ChatDataController {
                 single,
                 formatted.isEmpty() ? null : formatted);
         Trace.emit("BE→FE 응답 (chat/data done, formattedMessages " + formatted.size() + "건)", done);
-        SseSupport.sseHeaders(res);
-        ServletOutputStream out = res.getOutputStream();
         SseSupport.write(out, SseSupport.sse("done", done));
         res.flushBuffer();
+    }
+
+    /**
+     * 진행 한 줄 — {@code progress {done, total}}. 쓰기가 실패해도(연결이 끊겼다)
+     * 판정은 계속한다: 진행 표시가 본문을 죽이면 안 된다.
+     */
+    private static void writeProgress(
+            HttpServletResponse res, ServletOutputStream out, int count, int total) {
+        try {
+            SseSupport.write(out, SseSupport.sse(
+                    "progress", Map.of("done", count, "total", total)));
+            res.flushBuffer();
+        } catch (IOException e) {
+            Trace.raw("진행 전송 실패 (판정은 계속)", String.valueOf(e));
+        }
     }
 
     /**
