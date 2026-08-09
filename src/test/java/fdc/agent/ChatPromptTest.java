@@ -77,12 +77,13 @@ class ChatPromptTest {
 
     @Test
     void 수집_툴의_규칙도_툴에서_나온다() {
-        // retrieve_data·request_input 은 항상 붙으므로 규칙도 항상 있다 —
+        // retrieve_data·request_input·choice_request 는 항상 붙으므로 규칙도 항상 있다 —
         // 다만 그 문장의 출처는 시스템 프롬프트 상수가 아니라 툴 자신이다.
         CaptureSystem llm = new CaptureSystem(new LlmTurn.Final("ok"));
         agent(llm).run(ask("안녕하세요"), null);
 
-        assertThat(llm.systems.get(0)).contains("retrieve_data").contains("request_input");
+        assertThat(llm.systems.get(0))
+                .contains("retrieve_data").contains("request_input").contains("choice_request");
     }
 
     @Test
