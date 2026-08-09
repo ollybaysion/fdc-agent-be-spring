@@ -24,7 +24,8 @@ import org.springframework.test.web.servlet.MockMvc;
 class ChatDataMessageTest {
 
     private static final String DUMP =
-            "LotProcessResult{eqpId=CVD-01, lotId=LOT-24135, "
+            "LotProcessResult{eqpId=CVD-01, eventTime=2026-08-08T11:58:03.412765, "
+                    + "lotId=LOT-24135, "
                     + "recipe=RecipeInfo{recipeId=R-88, version=3}, "
                     + "steps=[StepResult{stepNo=1, status=OK}]}";
 
@@ -54,6 +55,9 @@ class ChatDataMessageTest {
         assertThat(fm.path("eqpId").asText()).isEqualTo("CVD-01");
         assertThat(fm.path("className").asText()).isEqualTo("LotProcessResult");
         assertThat(fm.path("comment").asText()).isNotEmpty();
+        // 다건 목록이 이 두 필드로 이름 붙이고 줄을 세운다.
+        assertThat(fm.path("title").asText()).isEqualTo("LOT-24135");
+        assertThat(fm.path("occurredAt").asText()).isEqualTo("2026-08-08T11:58:03.412765");
         // 메시지 왕복은 패널 판정이 아니다 — 원장을 싣지 않는다(FE 도 replace 안 함).
         assertThat(done.has("dataRequests")).isFalse();
     }

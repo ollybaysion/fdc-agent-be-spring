@@ -11,11 +11,19 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  *
  * <p>{@code json} 은 문자열이 아니라 객체다 — pretty-print 는 FE 소유.
  * {@code eqpId} 는 FE 가 설비 카드 배치에 쓰고, 없으면 미분류로 흘러간다.
+ *
+ * <p>{@code title}·{@code occurredAt} 은 <b>다건</b>을 위한 필드다(#64 다중 메시지).
+ * 한 건일 때는 없어도 화면이 성립하지만, 수십 건이 목록에 쌓이면 서로를 구별할
+ * 이름과 줄 세울 시각이 없으면 고를 수가 없다. {@code occurredAt} 은 등록 시각이
+ * 아니라 <b>메시지 안에 찍힌 발생 시각</b>이고, 같은 초에 여러 건이 들어오는 데이터라
+ * 소수초까지 원문 정밀도를 그대로 싣는다(FE 정렬이 그 자릿수에 의존한다).
  */
 public record FormattedMessage(
         Object json,
         @JsonInclude(JsonInclude.Include.NON_NULL) String comment,
         @JsonInclude(JsonInclude.Include.NON_NULL) String eqpId,
         @JsonInclude(JsonInclude.Include.NON_NULL) String className,
+        @JsonInclude(JsonInclude.Include.NON_NULL) String title,
+        @JsonInclude(JsonInclude.Include.NON_NULL) String occurredAt,
         @JsonInclude(JsonInclude.Include.NON_NULL) String docId) {
 }

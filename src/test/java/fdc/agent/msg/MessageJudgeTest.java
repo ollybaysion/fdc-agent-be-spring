@@ -30,4 +30,34 @@ class MessageJudgeTest {
         assertThat(MessageJudge.parse("{\"json\":\"문자열\"}")).isNull();
         assertThat(MessageJudge.parse("JSON 아님")).isNull();
     }
+
+    @Test
+    void 파서는_제목과_시각을_그대로_싣는다() {
+        var out = MessageJudge.parse("""
+                {"json":{"a":"1"},"title":"LOT-24135 · R-88",
+                 "occurredAt":"2026-08-08T11:58:03.412765"}
+                """);
+        assertThat(out).isNotNull();
+        assertThat(out.title()).isEqualTo("LOT-24135 · R-88");
+        // 소수초는 자르지도 채우지도 않는다 — 같은 초 두 건의 순서가 여기 달렸다.
+        assertThat(out.occurredAt()).isEqualTo("2026-08-08T11:58:03.412765");
+    }
+
+    @Test
+    void 시각_문지기는_모양만_본다() {
+        assertThat(MessageJudge.asOccurredAt("2026-08-08T11:58:03.412765"))
+                .isEqualTo("2026-08-08T11:58:03.412765");
+        assertThat(MessageJudge.asOccurredAt("2026-08-08 11:58:03.412"))
+                .isEqualTo("2026-08-08 11:58:03.412");
+        assertThat(MessageJudge.asOccurredAt("2026-08-08T11:58:03+09:00"))
+                .isEqualTo("2026-08-08T11:58:03+09:00");
+        assertThat(MessageJudge.asOccurredAt("  2026-08-08T11:58  ")).isEqualTo("2026-08-08T11:58");
+        // 모델이 문장·조각을 실으면 버린다 — 정렬 키로 쓸 수 없다.
+        assertThat(MessageJudge.asOccurredAt("오전 11시쯤")).isNull();
+        assertThat(MessageJudge.asOccurredAt("11:58:03.412765")).isNull();
+        assertThat(MessageJudge.asOccurredAt("2026-08-08")).isNull();
+        assertThat(MessageJudge.asOccurredAt("")).isNull();
+        assertThat(MessageJudge.asOccurredAt(42)).isNull();
+        assertThat(MessageJudge.asOccurredAt(null)).isNull();
+    }
 }

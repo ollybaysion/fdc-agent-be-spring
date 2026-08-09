@@ -368,6 +368,11 @@ public class MockLlm implements LlmClient {
      * 메시지 포맷팅 프롬프트 → 계약 JSON. 실 모델은 중첩까지 구조화하지만, 목은
      * <b>최상위 {@code k=v} 만</b> 평탄 분해한다(중첩 객체·리스트는 문자열 그대로) —
      * 결정론 파서를 들이지 않기로 한 MVP 결정(#64 결정 8)을 목이 앞지르면 안 된다.
+     *
+     * <p>{@code title}·{@code occurredAt} 도 같은 규율로 <b>최상위에서만</b> 줍는다:
+     * 시각은 타임스탬프 모양의 첫 값, 제목은 eqpId 가 아닌 첫 식별 값이다. 목의 이
+     * 규칙은 실 모델의 판단을 흉내 내는 게 아니라, 다건 화면을 목만으로 돌려볼 수
+     * 있게 하는 최소한이다.
      */
     static String messageFormatAnswer(String prompt) {
         int at = prompt.lastIndexOf("원문:");
@@ -378,6 +383,8 @@ public class MockLlm implements LlmClient {
         StringBuilder json = new StringBuilder("{");
         String className = null;
         String eqpId = null;
+        String occurredAt = null;
+        String title = null;
         int count = 0;
         if (shape.matches()) {
             className = shape.group(1);
@@ -389,6 +396,13 @@ public class MockLlm implements LlmClient {
                         .append(jsonEscape(e.getValue())).append('"');
                 if (e.getKey().equalsIgnoreCase("eqpId")) {
                     eqpId = e.getValue();
+                } else {
+                    if (occurredAt == null && TIMESTAMP.matcher(e.getValue()).matches()) {
+                        occurredAt = e.getValue();
+                    }
+                    if (title == null && IDENT_KEY.matcher(e.getKey()).matches()) {
+                        title = e.getValue();
+                    }
                 }
                 count++;
             }
@@ -406,8 +420,24 @@ public class MockLlm implements LlmClient {
         if (className != null) {
             out.append(",\"className\":\"").append(jsonEscape(className)).append('"');
         }
+        String label = title != null ? title : className;
+        if (label != null) {
+            out.append(",\"title\":\"").append(jsonEscape(label)).append('"');
+        }
+        if (occurredAt != null) {
+            out.append(",\"occurredAt\":\"").append(jsonEscape(occurredAt)).append('"');
+        }
         return out.append('}').toString();
     }
+
+    /** 타임스탬프 모양 — 목이 {@code occurredAt} 후보를 값만 보고 고르는 자(키 추측 없음). */
+    private static final Pattern TIMESTAMP = Pattern.compile(
+            "\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,9})?)?"
+                    + "(Z|[+-]\\d{2}:?\\d{2})?");
+
+    /** 식별 필드 키 — 목의 제목 후보. */
+    private static final Pattern IDENT_KEY =
+            Pattern.compile("(?i).*(id|code|no|name)");
 
     /** 중괄호·대괄호 깊이 0 의 콤마로만 자른 {@code k=v} 쌍들 — 순서 보존. */
     private static Map<String, String> topLevelPairs(String inner) {

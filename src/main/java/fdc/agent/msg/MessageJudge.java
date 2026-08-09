@@ -43,6 +43,16 @@ public final class MessageJudge {
     private static final Pattern CLASS_DUMP =
             Pattern.compile("^[A-Za-z_$][A-Za-z0-9_$.]*\\s*\\{[\\s\\S]*}$");
 
+    /**
+     * {@code occurredAt} 문지기 — 추출이 아니라 <b>형식 검증</b>이다. 시각도 LLM 이
+     * 뽑기로 했으니(설계 결정 8 연장), 모델이 "오전 11시쯤" 같은 문장이나 헛것을 실어도
+     * FE 정렬이 뒤집히지 않게 모양만 본다. 통과 못 하면 null — 그 건은 등록 시각으로
+     * 줄 선다. 소수초 자릿수는 세지 않는다(원문 정밀도를 그대로 받는 게 계약이다).
+     */
+    private static final Pattern OCCURRED_AT = Pattern.compile(
+            "^\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}(:\\d{2}(\\.\\d{1,9})?)?"
+                    + "(Z|[+-]\\d{2}:?\\d{2})?$");
+
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private MessageJudge() {
@@ -97,7 +107,12 @@ public final class MessageJudge {
                 {"json": <원문을 데이터 유실 없이 구조화한 객체>,
                  "comment": "<이 메시지가 무엇인지 한 줄 요약 (경고·이상 우선)>",
                  "eqpId": "<설비 id 필드가 보이면 그 값, 없으면 생략>",
-                 "className": "<클래스명/전문명이 보이면 그 값, 없으면 생략>"}
+                 "className": "<클래스명/전문명이 보이면 그 값, 없으면 생략>",
+                 "title": "<목록에서 이 한 건을 알아볼 20자 안팎의 이름. lot/alarm/step
+                           같은 식별 값을 쓴다. 클래스명만 반복하지 말 것>",
+                 "occurredAt": "<메시지 안에 찍힌 발생 시각을 yyyy-MM-ddTHH:mm:ss.FFFFFF
+                                형태로. 소수초는 원문에 적힌 자릿수 그대로 옮기고 자르거나
+                                반올림하지 말 것. 시각이 없으면 생략>"}
 
                 원문:
                 """ + pasted;
@@ -121,10 +136,18 @@ public final class MessageJudge {
                     asText(map.get("comment")),
                     asText(map.get("eqpId")),
                     asText(map.get("className")),
+                    asText(map.get("title")),
+                    asOccurredAt(map.get("occurredAt")),
                     null);
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /** 모양이 맞는 시각만 통과 — 나머지는 null(그 건은 등록 시각으로 줄 선다). */
+    static String asOccurredAt(Object value) {
+        String text = asText(value);
+        return text != null && OCCURRED_AT.matcher(text.trim()).matches() ? text.trim() : null;
     }
 
     private static String stripFences(String content) {
