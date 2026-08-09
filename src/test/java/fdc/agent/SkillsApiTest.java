@@ -71,6 +71,21 @@ class SkillsApiTest {
     }
 
     @Test
+    void 날짜_인자는_spec의_type이_실리고_나머지는_생략된다() throws Exception {
+        // FE 가 이 신호로 캘린더를 붙인다(#72) — 신호가 없는 인자는 자유 텍스트 그대로.
+        JsonNode trace = byName(skills(), "fdc-trace-reading");
+        assertThat(trace).isNotNull();
+
+        JsonNode start = trace.path("inputs").get(2);
+        assertThat(start.path("key").asText()).isEqualTo("start");
+        assertThat(start.path("type").asText()).isEqualTo("datetime");
+        assertThat(trace.path("inputs").get(3).path("type").asText()).isEqualTo("datetime");
+
+        assertThat(trace.path("inputs").get(0).has("type")).isFalse();
+        assertThat(trace.path("inputs").get(1).has("type")).isFalse();
+    }
+
+    @Test
     void 조달은_SQL과_bind_출처를_구분해_준다() throws Exception {
         // argBinds = 사용자가 채울 수 있는 자리, priorQueryBinds = 앞 조회 결과가 채우는 자리.
         JsonNode trace = byName(skills(), "fdc-trace-reading");

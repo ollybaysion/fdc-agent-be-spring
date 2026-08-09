@@ -17,10 +17,20 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * 한 번에 한 스킬만 진행하지만(단일), 스키마는 멀티-스킬 대비로 태그를 싣는다.
  * {@code key} 는 스킬 인자 이름과 1:1 이라 회신된 {@code inputs[skill][key]} 로 곧장
  * 바인딩된다. {@code description} 은 선택 — 없으면 JSON 에서 생략한다.
+ *
+ * <p>{@code type} 은 spec 이 선언한 입력 위젯 신호({@code datetime | date}, 없으면
+ * 자유 텍스트) — FE 입력 카드가 이 값으로 캘린더를 붙인다. LLM 인자가 아니라
+ * {@link fdc.agent.chat.InputRequestTool} 이 (skill, key) 로 spec 에서 결정론으로
+ * 찾아 싣는다.
  */
 public record InputRequest(
         String skill,
         String key,
         String label,
-        @JsonInclude(JsonInclude.Include.NON_NULL) String description) {
+        @JsonInclude(JsonInclude.Include.NON_NULL) String description,
+        @JsonInclude(JsonInclude.Include.NON_NULL) String type) {
+
+    public InputRequest(String skill, String key, String label, String description) {
+        this(skill, key, label, description, null);
+    }
 }

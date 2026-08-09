@@ -170,7 +170,7 @@ public class ChatAgent {
         // 풀이 비면 retrieve_data 를 아예 붙이지 않는다 — 요청할 수 있는 게 없는데 규칙만
         // 프롬프트에 남으면, 못 부를 툴을 쓰라고 지시하는 꼴이 된다.
         RetrieveDataTool dataRequests = pool.isEmpty() ? null : new RetrieveDataTool(pool, progress);
-        InputRequestTool inputRequests = new InputRequestTool(providedInputs, scope);
+        InputRequestTool inputRequests = new InputRequestTool(providedInputs, scope, skillSpecs);
         ChoiceRequestTool choiceRequests = new ChoiceRequestTool();
 
         List<AgentTool> tools = new ArrayList<>(SkillRegistry.compile(skillSpecs, skillQuery));

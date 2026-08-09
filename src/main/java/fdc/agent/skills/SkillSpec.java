@@ -37,8 +37,18 @@ public record SkillSpec(
         SkillOutput output,
         String discipline) {
 
-    /** 툴 파라미터 하나. 인자 계약의 진실원은 wiring 이 아니라 여기다. */
-    public record SkillInput(String name, boolean required, String description) {
+    /**
+     * 툴 파라미터 하나. 인자 계약의 진실원은 wiring 이 아니라 여기다.
+     *
+     * <p>{@code type} 은 입력 위젯 신호(akg json-spec v0.9.0, {@code datetime | date},
+     * 없으면 자유 텍스트) — 값은 여전히 문자열이고 bind·실행 계약과 무관하다. BE 는
+     * 해석하지 않고 /skills 응답과 입력 요청 카드로 그대로 전달한다.
+     */
+    public record SkillInput(String name, boolean required, String description, String type) {
+
+        public SkillInput(String name, boolean required, String description) {
+            this(name, required, description, null);
+        }
     }
 
     public record SkillDependency(String mcp, List<String> tools, String why) {

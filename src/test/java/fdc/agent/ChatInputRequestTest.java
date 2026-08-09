@@ -79,6 +79,24 @@ class ChatInputRequestTest {
         assertThat(req.key()).isEqualTo("param_index");
         assertThat(req.label()).isEqualTo("PARAM_INDEX");
         assertThat(req.description()).isEqualTo("센서 파라미터 인덱스");
+        // spec 에 type 이 없는 인자 — 신호도 없다(자유 텍스트).
+        assertThat(req.type()).isNull();
+    }
+
+    @Test
+    void 날짜_인자_요청에는_spec의_type이_실린다() {
+        // type 은 LLM 인자가 아니다 — (skill, key) 로 spec 에서 결정론으로 찾는다.
+        CaptureLlm llm = new CaptureLlm(List.of(
+                new LlmTurn.ToolCalls(List.of(requestInput(Map.of(
+                        "skill", "fdc_trace_reading",
+                        "key", "start",
+                        "label", "START")))),
+                new LlmTurn.Final("수집 구간 시작 시각을 입력해 주세요.")));
+        AgentResult result = agent(llm).run(
+                List.of(new HistoryMessage(Role.USER, "CVD-01 측정 분석해줘")), null);
+
+        assertThat(result.inputRequests()).hasSize(1);
+        assertThat(result.inputRequests().get(0).type()).isEqualTo("datetime");
     }
 
     @Test
