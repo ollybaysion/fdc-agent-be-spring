@@ -1,0 +1,15 @@
+{
+  "id": "fdc-monitor-trend",
+  "name": "트렌드 조회",
+  "program": "FDC Monitor",
+  "menuPath": ["트렌드"],
+  "hints": [
+    "화면 상단을 시계열 꺾은선 차트가 차지한다",
+    "차트 아래에 원자료 표가 딸려 있을 수 있다",
+    "설비·센서를 여러 개 겹쳐 그릴 수 있는 범례가 보인다"
+  ],
+  "expectedColumns": {
+    "required": ["측정시각", "측정값"],
+    "optional": ["설비ID", "센서ID", "이동평균"]
+  }
+}

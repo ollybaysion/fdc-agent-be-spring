@@ -7,6 +7,7 @@ import fdc.agent.chat.InputRequestTool;
 import fdc.agent.chat.RetrieveDataTool;
 import fdc.agent.chat.SnapshotQueryTool;
 import fdc.agent.msg.MessageJudge;
+import fdc.agent.screens.ScreenClassifier;
 import fdc.agent.contract.Role;
 import fdc.agent.llm.LlmTypes.LlmClient;
 import fdc.agent.llm.LlmTypes.LlmMessage;
@@ -52,6 +53,8 @@ public class MockLlm implements LlmClient {
             Pattern.compile("이\\s*데이터|붙여넣|첨부|조회|스냅샷|등록\\s*완료|등록했", Pattern.CASE_INSENSITIVE);
     // 스키마 카탈로그의 백틱 테이블명(예: `sensor_list`)에서 조회 대상 테이블을 뽑는다.
     private static final Pattern SNAPSHOT_TABLE = Pattern.compile("`([A-Za-z0-9_]+)`");
+    // 화면 분류 프롬프트의 카탈로그 한 줄 — "- <id>: <name> (...)". id 만 뽑는다.
+    private static final Pattern CLASSIFY_CATALOG_LINE = Pattern.compile("(?m)^- (\\S+?):");
 
     @Override
     public LlmTurn next(List<LlmMessage> messages, List<LlmToolSpec> tools) {
@@ -82,6 +85,11 @@ public class MockLlm implements LlmClient {
         // 자리를 목은 최상위 k=v 평탄 분해로 흉내낸다(중첩 값은 문자열 그대로).
         if (question.contains(MessageJudge.FORMAT_INSTRUCTION)) {
             return new LlmTurn.Final(messageFormatAnswer(question));
+        }
+        // 화면 분류 지시(#63) — 실 vision 모델이 캡처를 보고 고를 자리를 목은 카탈로그
+        // 순서로 흉내낸다(이미지 자체는 못 보니 목이 볼 건 프롬프트에 실린 목록뿐).
+        if (question.contains(ScreenClassifier.CLASSIFY_INSTRUCTION)) {
+            return new LlmTurn.Final(classifyAnswer(question));
         }
         LlmToolCall call = planCall(question, contextSection(messages), tools);
         if (call != null) {
@@ -362,6 +370,28 @@ public class MockLlm implements LlmClient {
         List<String> lines = verdict.lines().filter(l -> l.startsWith("- ")).toList();
         return "요청하신 조회 절차가 완료됐습니다.\n" + String.join("\n", lines)
                 + "\n\n값 전문은 데이터 패널에서 확인하세요. (온프렘 LLM 미설정 시 mock 서술)";
+    }
+
+    /**
+     * 화면 분류 프롬프트 → 후보 JSON. 실 vision 모델이 캡처를 보고 판단할 자리를,
+     * 목은 프롬프트에 실린 카탈로그의 <b>앞 3개 id</b>를 그대로 후보로 돌려 흉내낸다
+     * (닫힌 목록 강제는 {@code ScreenClassifier} 쪽 책임이라 목은 신경 쓰지 않는다).
+     */
+    static String classifyAnswer(String prompt) {
+        Matcher line = CLASSIFY_CATALOG_LINE.matcher(prompt);
+        List<String> ids = new ArrayList<>();
+        while (line.find() && ids.size() < 3) {
+            ids.add(line.group(1));
+        }
+        StringBuilder json = new StringBuilder("{\"candidates\":[");
+        for (int i = 0; i < ids.size(); i++) {
+            if (i > 0) {
+                json.append(',');
+            }
+            json.append("{\"id\":\"").append(ids.get(i))
+                    .append("\",\"reason\":\"(mock) 카탈로그 순번 ").append(i + 1).append("\"}");
+        }
+        return json.append("]}").toString();
     }
 
     /**

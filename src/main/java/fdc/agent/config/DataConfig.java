@@ -8,6 +8,10 @@ import fdc.agent.lines.AkgLineSource;
 import fdc.agent.lines.LineSource;
 import fdc.agent.schema.AkgSchemaSource;
 import fdc.agent.schema.SchemaSource;
+import fdc.agent.screens.AkgScreenMapSource;
+import fdc.agent.screens.BundledScreenMapSource;
+import fdc.agent.screens.ScreenClassifier;
+import fdc.agent.screens.ScreenMapSource;
 import fdc.agent.skills.AkgSkillSource;
 import fdc.agent.skills.SkillQuery;
 import fdc.agent.skills.SkillRegistry;
@@ -83,5 +87,22 @@ public class DataConfig {
     @Bean
     public ChatAgent chatAgent(LlmClient llm, SkillQuery skillQuery, SkillSource skillSource) {
         return new ChatAgent(llm, skillQuery, skillSource);
+    }
+
+    /**
+     * 화면 카탈로그 출처 seam — 스킬과 같은 스위치를 탄다(이슈 #63). 미설정/제한망이면
+     * classpath 번들(데모 화면 3장).
+     */
+    @Bean
+    public ScreenMapSource screenMapSource(AppProps props) {
+        AppProps.Akg akg = props.akg();
+        return !props.isRestricted() && akg.isConfigured()
+                ? new AkgScreenMapSource(akg.url(), akg.token(), akg.refreshSeconds())
+                : new BundledScreenMapSource();
+    }
+
+    @Bean
+    public ScreenClassifier screenClassifier(LlmClient llm, ScreenMapSource screenMapSource) {
+        return new ScreenClassifier(llm, screenMapSource);
     }
 }
