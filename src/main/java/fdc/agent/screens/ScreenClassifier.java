@@ -150,8 +150,12 @@ public final class ScreenClassifier {
         }
     }
 
-    /** {@code program › menuPath 요소들} — 둘 다 없으면 빈 문자열. */
-    static String menuLabel(ScreenMap m) {
+    /**
+     * {@code program › menuPath 요소들} — 둘 다 없으면 빈 문자열. 후보 행의 캡션이자
+     * ④ 브라우저 항목의 캡션이라 인렛({@code /chat/image})이 그대로 쓴다: 같은 화면이
+     * 어느 경로로 보이든 한 가지 표기여야 한다.
+     */
+    public static String menuLabel(ScreenMap m) {
         List<String> parts = new ArrayList<>();
         if (m.program() != null && !m.program().isBlank()) {
             parts.add(m.program());
