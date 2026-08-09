@@ -37,7 +37,8 @@ public class SkillsController {
 
     private static SkillCatalog.Entry toEntry(SkillSpec spec, QueryPool pool) {
         List<SkillCatalog.Input> inputs = spec.inputs().stream()
-                .map(in -> new SkillCatalog.Input(in.name(), in.required(), in.description()))
+                .map(in -> new SkillCatalog.Input(
+                        in.name(), in.required(), in.description(), in.type()))
                 .toList();
 
         List<SkillCatalog.Need> needs = spec.needs().stream()

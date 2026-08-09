@@ -19,8 +19,18 @@
       "required": true,
       "description": "센서를 특정하는 파라미터 인덱스 — 센서 이름이 아니다"
     },
-    { "name": "start", "required": true, "description": "수집 구간 시작 시각" },
-    { "name": "end", "required": true, "description": "수집 구간 끝 시각" }
+    {
+      "name": "start",
+      "required": true,
+      "description": "수집 구간 시작 시각",
+      "type": "datetime"
+    },
+    {
+      "name": "end",
+      "required": true,
+      "description": "수집 구간 끝 시각",
+      "type": "datetime"
+    }
   ],
   "dependencies": [
     {

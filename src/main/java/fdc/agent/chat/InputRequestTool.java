@@ -2,6 +2,7 @@ package fdc.agent.chat;
 
 import fdc.agent.contract.InputRequest;
 import fdc.agent.contract.QueryScope;
+import fdc.agent.skills.SkillSpec;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -30,10 +31,36 @@ public final class InputRequestTool implements AgentTool {
     private final Set<InputKey> provided = new LinkedHashSet<>();
     private final Set<InputKey> requested = new LinkedHashSet<>();
     private final List<InputRequest> collected = new ArrayList<>();
+    /** spec 이 선언한 인자별 입력 위젯 신호 — (스킬, 인자) → datetime|date. */
+    private final Map<InputKey, String> inputTypes = new LinkedHashMap<>();
 
-    public InputRequestTool(Map<String, Map<String, String>> inputs, QueryScope scope) {
+    public InputRequestTool(
+            Map<String, Map<String, String>> inputs, QueryScope scope, List<SkillSpec> specs) {
         addProvidedInputs(inputs);
         addScopeInputs(scope);
+        addSpecInputTypes(specs);
+    }
+
+    /**
+     * 입력 위젯 신호는 LLM 인자가 아니라 spec 소관 — (skill, key) 로 여기서 결정론으로
+     * 찾는다. LLM 은 스킬을 툴 이름(언더스코어)으로 부르므로 두 표기 다 등록한다.
+     */
+    private void addSpecInputTypes(List<SkillSpec> specs) {
+        if (specs == null) {
+            return;
+        }
+        for (SkillSpec spec : specs) {
+            if (spec == null || spec.name() == null || spec.inputs() == null) {
+                continue;
+            }
+            for (SkillSpec.SkillInput in : spec.inputs()) {
+                if (in.type() == null) {
+                    continue;
+                }
+                inputTypes.put(new InputKey(spec.name(), in.name()), in.type());
+                inputTypes.put(new InputKey(spec.name().replace("-", "_"), in.name()), in.type());
+            }
+        }
     }
 
     /** 사용자가 입력 카드로 채워 되보낸 값. */
@@ -120,7 +147,8 @@ public final class InputRequestTool implements AgentTool {
         if (provided.contains(dedup) || !requested.add(dedup)) {
             return ToolResult.of("이미 제공되었거나 요청된 입력입니다: " + label + " — 그 값으로 이어서 진행하라.");
         }
-        collected.add(new InputRequest(skill, key, label, ToolArgs.text(args, "description")));
+        collected.add(new InputRequest(skill, key, label,
+                ToolArgs.text(args, "description"), inputTypes.get(dedup)));
         return ToolResult.of("입력 요청을 등록했습니다: " + label
                 + ". 데이터 패널의 입력 카드에 값을 넣어 주시면 그 값으로 이어서 분석합니다. 없는 값은 지어내지 않습니다.");
     }

@@ -41,11 +41,17 @@ public record SkillCatalog(List<Entry> skills) {
             List<Query> queries) {
     }
 
-    /** 스킬 인자 하나 = FE 입력 카드 하나(아직 값이 없다면). */
+    /**
+     * 스킬 인자 하나 = FE 입력 카드 하나(아직 값이 없다면).
+     *
+     * <p>{@code type} 은 spec 이 선언한 입력 위젯 신호({@code datetime | date}, 없으면
+     * 자유 텍스트) — FE 진입 폼이 이 값으로 캘린더를 붙인다(demo-fe #190).
+     */
     public record Input(
             String key,
             boolean required,
-            @JsonInclude(JsonInclude.Include.NON_NULL) String description) {
+            @JsonInclude(JsonInclude.Include.NON_NULL) String description,
+            @JsonInclude(JsonInclude.Include.NON_NULL) String type) {
     }
 
     /**
