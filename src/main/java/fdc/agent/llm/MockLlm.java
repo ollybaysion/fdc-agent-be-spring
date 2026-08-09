@@ -6,6 +6,7 @@ import fdc.agent.chat.NarrationPrompt;
 import fdc.agent.chat.InputRequestTool;
 import fdc.agent.chat.RetrieveDataTool;
 import fdc.agent.chat.SnapshotQueryTool;
+import fdc.agent.msg.MessageJudge;
 import fdc.agent.contract.Role;
 import fdc.agent.llm.LlmTypes.LlmClient;
 import fdc.agent.llm.LlmTypes.LlmMessage;
@@ -76,6 +77,11 @@ public class MockLlm implements LlmClient {
         // 감지는 문장이 아니라 지시 상수에 붙는다.
         if (question.contains(NarrationPrompt.NARRATE_INSTRUCTION)) {
             return new LlmTurn.Final(narration(lastAssistantText(messages)));
+        }
+        // 메시지 포맷팅 지시(/chat/data pasted, #64) — 실 모델이 유실 없이 구조화할
+        // 자리를 목은 최상위 k=v 평탄 분해로 흉내낸다(중첩 값은 문자열 그대로).
+        if (question.contains(MessageJudge.FORMAT_INSTRUCTION)) {
+            return new LlmTurn.Final(messageFormatAnswer(question));
         }
         LlmToolCall call = planCall(question, contextSection(messages), tools);
         if (call != null) {
@@ -356,6 +362,96 @@ public class MockLlm implements LlmClient {
         List<String> lines = verdict.lines().filter(l -> l.startsWith("- ")).toList();
         return "요청하신 조회 절차가 완료됐습니다.\n" + String.join("\n", lines)
                 + "\n\n값 전문은 데이터 패널에서 확인하세요. (온프렘 LLM 미설정 시 mock 서술)";
+    }
+
+    /**
+     * 메시지 포맷팅 프롬프트 → 계약 JSON. 실 모델은 중첩까지 구조화하지만, 목은
+     * <b>최상위 {@code k=v} 만</b> 평탄 분해한다(중첩 객체·리스트는 문자열 그대로) —
+     * 결정론 파서를 들이지 않기로 한 MVP 결정(#64 결정 8)을 목이 앞지르면 안 된다.
+     */
+    static String messageFormatAnswer(String prompt) {
+        int at = prompt.lastIndexOf("원문:");
+        String raw = at >= 0 ? prompt.substring(at + "원문:".length()).trim() : prompt.trim();
+        Matcher shape = Pattern
+                .compile("^([A-Za-z_$][A-Za-z0-9_$.]*)\\s*\\{([\\s\\S]*)}$")
+                .matcher(raw);
+        StringBuilder json = new StringBuilder("{");
+        String className = null;
+        String eqpId = null;
+        int count = 0;
+        if (shape.matches()) {
+            className = shape.group(1);
+            for (Map.Entry<String, String> e : topLevelPairs(shape.group(2)).entrySet()) {
+                if (count > 0) {
+                    json.append(',');
+                }
+                json.append('"').append(jsonEscape(e.getKey())).append("\":\"")
+                        .append(jsonEscape(e.getValue())).append('"');
+                if (e.getKey().equalsIgnoreCase("eqpId")) {
+                    eqpId = e.getValue();
+                }
+                count++;
+            }
+        } else {
+            json.append("\"raw\":\"").append(jsonEscape(raw)).append('"');
+        }
+        json.append('}');
+        StringBuilder out = new StringBuilder("{\"json\":").append(json);
+        out.append(",\"comment\":\"(mock) ")
+                .append(jsonEscape(className != null ? className : "메시지"))
+                .append(" — 최상위 필드 ").append(count).append("개를 평탄 분해했습니다.\"");
+        if (eqpId != null) {
+            out.append(",\"eqpId\":\"").append(jsonEscape(eqpId)).append('"');
+        }
+        if (className != null) {
+            out.append(",\"className\":\"").append(jsonEscape(className)).append('"');
+        }
+        return out.append('}').toString();
+    }
+
+    /** 중괄호·대괄호 깊이 0 의 콤마로만 자른 {@code k=v} 쌍들 — 순서 보존. */
+    private static Map<String, String> topLevelPairs(String inner) {
+        Map<String, String> out = new LinkedHashMap<>();
+        int depth = 0;
+        int start = 0;
+        for (int i = 0; i <= inner.length(); i++) {
+            char c = i < inner.length() ? inner.charAt(i) : ',';
+            if (c == '{' || c == '[') {
+                depth++;
+            } else if (c == '}' || c == ']') {
+                depth--;
+            } else if (c == ',' && depth == 0) {
+                String part = inner.substring(start, i).trim();
+                start = i + 1;
+                int eq = part.indexOf('=');
+                if (eq > 0) {
+                    out.put(part.substring(0, eq).trim(), part.substring(eq + 1).trim());
+                }
+            }
+        }
+        return out;
+    }
+
+    private static String jsonEscape(String value) {
+        StringBuilder out = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            switch (c) {
+                case '"' -> out.append("\\\"");
+                case '\\' -> out.append("\\\\");
+                case '\n' -> out.append("\\n");
+                case '\r' -> out.append("\\r");
+                case '\t' -> out.append("\\t");
+                default -> {
+                    if (c < 0x20) {
+                        out.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        out.append(c);
+                    }
+                }
+            }
+        }
+        return out.toString();
     }
 
     private static String genericAnswer(String text) {
