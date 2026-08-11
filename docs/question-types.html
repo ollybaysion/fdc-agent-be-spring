@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>질문 유형(QT) 분류와 유형별 설계 전략 — Inline FDC Agent</title>
+<style>
+/* ── 테마 변수 ─────────────────────────────────────────────
+   기본 = 라이트. 다크는 두 경로로 켜진다:
+   ① OS 설정(prefers-color-scheme) — 단 수동 라이트 선택이 이김
+   ② 수동 토글(:root[data-theme="dark"]) — Artifact 뷰어 계약과 동일 셀렉터 */
+:root {
+  color-scheme: light;
+  --bg: #EEF0F1;
+  --surface: #F9FAFA;
+  --sunken: #E5E9EA;
+  --fg: #14181B;
+  --fg-2: #47535B;
+  --muted: #6E7C85;
+  --border: #D2D8DB;
+  --border-soft: #E2E6E8;
+  --accent: #A8451A;
+  --accent-bg: rgba(168, 69, 26, 0.09);
+  --code-bg: #E5E9EA;
+  --mark-bg: rgba(168, 69, 26, 0.14);
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "D2Coding", monospace;
+  --font-serif: Georgia, "Times New Roman", "Apple SD Gothic Neo", serif;
+  --measure: 38rem;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0F1417;
+    --surface: #161D21;
+    --sunken: #12181B;
+    --fg: #E4E9EB;
+    --fg-2: #A3B0B7;
+    --muted: #77858D;
+    --border: #273138;
+    --border-soft: #1E272C;
+    --accent: #E38C55;
+    --accent-bg: rgba(227, 140, 85, 0.13);
+    --code-bg: #12181B;
+    --mark-bg: rgba(227, 140, 85, 0.2);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0F1417;
+  --surface: #161D21;
+  --sunken: #12181B;
+  --fg: #E4E9EB;
+  --fg-2: #A3B0B7;
+  --muted: #77858D;
+  --border: #273138;
+  --border-soft: #1E272C;
+  --accent: #E38C55;
+  --accent-bg: rgba(227, 140, 85, 0.13);
+  --code-bg: #12181B;
+  --mark-bg: rgba(227, 140, 85, 0.2);
+}
+:root[data-theme="light"] { color-scheme: light; }
+
+/* ── 기본 ── */
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.72;
+  overflow-wrap: break-word;
+  word-break: keep-all;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-underline-offset: 3px; }
+a:hover { text-decoration-thickness: 2px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+
+/* ── 레이아웃: 사이드 TOC + 본문. minmax(0,1fr)이 pre/table 폭 폭주를 막는다 ── */
+.layout {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 1.5rem 5rem;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 3.5rem;
+}
+nav#toc {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: 100vh;
+  overflow-y: auto;
+  padding: 2rem 0;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+nav#toc .toc-title {
+  font-weight: 400;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 0.6875rem;
+  margin-bottom: 0.9rem;
+}
+nav#toc ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.45rem; }
+nav#toc li { margin: 0; }
+nav#toc li.toc-h3 { padding-left: 1rem; }
+nav#toc a { color: var(--fg-2); text-decoration: none; display: block; padding: 0.05rem 0 0.05rem 0.6rem; border-left: 2px solid transparent; }
+nav#toc a:hover { color: var(--fg); border-left-color: var(--accent); }
+nav#toc a.active { color: var(--fg); border-left-color: var(--accent); }
+main { min-width: 0; padding-top: 2rem; }
+@media (max-width: 960px) {
+  .layout { grid-template-columns: 1fr; gap: 0; }
+  nav#toc { position: static; max-height: none; border-bottom: 1px solid var(--border); }
+}
+
+/* ── 헤딩 ── */
+h1 {
+  font-size: clamp(1.9rem, 4.5vw, 2.7rem);
+  line-height: 1.15;
+  letter-spacing: -0.028em;
+  font-weight: 700;
+  margin: 0.5rem 0 0.75rem;
+  text-wrap: balance;
+}
+h2 {
+  font-size: 1.5rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+  margin: 3.25rem 0 1rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--border);
+  text-wrap: balance;
+}
+h3 {
+  font-size: 1.0625rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  margin: 2rem 0 0.6rem;
+}
+h2, h3 { scroll-margin-top: 1rem; }
+/* md의 ---(hr) 직후 섹션이 h2로 시작하면 괘선이 이중으로 겹친다 — h2 쪽을 죽인다 */
+hr + section > h2:first-child { border-top: none; padding-top: 0; }
+.hanchor { margin-left: 0.35rem; opacity: 0; font-size: 0.85em; }
+h2:hover .hanchor, h3:hover .hanchor { opacity: 0.7; }
+
+/* ── 본문 measure: 산문만 좁히고 표·다이어그램은 전폭 ── */
+main p, main ul, main ol { max-width: var(--measure); }
+main li { margin-bottom: 0.35rem; }
+main li::marker { color: var(--muted); }
+strong, b { font-weight: 650; }
+main > header {
+  padding: 1.25rem 0 1.75rem;
+  border-bottom: 1px solid var(--fg);
+  margin-bottom: 1.75rem;
+}
+
+/* ── 문서 메타: 버전 배지·작성일·개정 로그 ── */
+.badge {
+  display: inline-block;
+  vertical-align: 0.35em;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  padding: 0.16rem 0.6rem;
+  border: 1px solid var(--accent);
+  border-radius: 100px;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.doc-meta {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  margin: 0 0 1.25rem;
+  max-width: none;
+}
+details.revlog {
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  padding: 0.6rem 1.1rem;
+  font-size: 0.875rem;
+}
+details.revlog summary {
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+details.revlog ul { margin: 0.6rem 0 0.25rem; max-width: none; }
+.callout {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  background: var(--surface);
+  padding: 1rem 1.3rem;
+  margin: 1.5rem 0 1.75rem;
+}
+.callout > p { margin: 0.35rem 0; }
+.callout .callout-title { font-weight: 650; color: var(--accent); }
+
+/* ── 코드·다이어그램·표: 가로 스크롤은 각자 컨테이너 안에서만 ── */
+code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--code-bg);
+  border: 1px solid var(--border-soft);
+  padding: 0.08em 0.36em;
+  border-radius: 3px;
+}
+code.cite { color: var(--fg-2); }
+pre {
+  background: var(--sunken);
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  padding: 1.1rem 1.25rem;
+  overflow-x: auto;
+  line-height: 1.5;
+}
+pre code { background: none; border: none; padding: 0; font-size: 0.85rem; }
+pre.diagram {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+figure { margin: 1.25rem 0; }
+figcaption {
+  font-family: var(--font-mono);
+  color: var(--muted);
+  font-size: 0.6875rem;
+  margin-top: 0.6rem;
+}
+.table-wrap { overflow-x: auto; margin: 1.25rem 0; }
+table { border-collapse: collapse; font-size: 0.9375rem; min-width: 100%; line-height: 1.55; }
+th, td { padding: 0.55rem 1.1rem 0.55rem 0; text-align: left; vertical-align: top; }
+th {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  background: none;
+}
+td { border-bottom: 1px solid var(--border-soft); color: var(--fg-2); }
+td b, td strong { color: var(--fg); }
+blockquote {
+  margin: 2rem 0;
+  padding: 0 0 0 1.4rem;
+  border-left: 2px solid var(--accent);
+  max-width: var(--measure);
+  color: var(--fg);
+}
+blockquote p {
+  font-family: var(--font-serif);
+  font-size: 1.25rem;
+  line-height: 1.55;
+  font-style: italic;
+  max-width: none;
+  margin: 0;
+  text-wrap: balance;
+}
+mark { background: var(--mark-bg); color: inherit; padding: 0.05em 0.15em; border-radius: 2px; }
+hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+
+/* ── 파생물 표기(md 변환 모드 전용) ── */
+footer.derived {
+  margin-top: 3rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--fg);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+/* ── 테마 토글 ── */
+#theme-toggle {
+  position: fixed;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 10;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 100px;
+  padding: 0.3rem 0.8rem;
+  cursor: pointer;
+}
+#theme-toggle:hover { color: var(--fg); border-color: var(--accent); }
+
+/* ── 인쇄 ── */
+@media print {
+  #theme-toggle, nav#toc, .hanchor { display: none; }
+  .layout { display: block; max-width: none; padding: 0; }
+  body { font-size: 11pt; }
+  pre, .table-wrap { overflow-x: visible; }
+  a { color: inherit; }
+}
+</style>
+</head>
+<body>
+<button id="theme-toggle" type="button" aria-label="테마 전환"></button>
+<div class="layout">
+<nav id="toc" aria-label="목차">
+  <div class="toc-title">목차</div>
+  <ol id="toc-list"></ol>
+</nav>
+<main>
+<!-- CONTENT:START — 아래 예시를 실제 내용으로 교체한다. {{...}}는 전부 채운다.
+     블록 어휘·스니펫·확장 규칙은 design.md — 색은 var(--...) 토큰만. -->
+<header>
+  <h1>질문 유형(QT) 분류와 유형별 설계 전략 <span class="badge">v0.4 · 정본 전략</span></h1>
+  <p class="doc-meta">Inline FDC Agent 설계 시리즈 <b>1편</b> · 작성 2026-08-02 · 상태 확정(전략)·초안(세부) · 적용 대상: fdc-agent-be-spring</p>
+  <details class="revlog">
+    <summary>개정 로그</summary>
+    <ul>
+      <li><b>v0.4</b> (2026-08-02) — §4 전면 개정: 정복 범위를 <b>단일 스킬 우선</b>으로 선언,
+        턴 파이프라인(조달→제공→서술)·실행부 상태 정밀화(검증 체계 + 백로그 4건)·ACI 표면
+        인벤토리와 쟁점 4건·미니 골든셋(단일 스킬 선행판) 추가. <b>설계 시리즈 1편 선언</b>
+        — 시리즈 목차 신설.</li>
+      <li><b>v0.3</b> (2026-08-02) — <b>정본 전략 선언 승격</b>: §0에 전략 선언·행위자 표 추가,
+        §8 운영 루프에 행위자(asf·akg·obs·골든셋)와 라우팅 세금 반영, §7에 QT4 실패 폴백 2단 정책.</li>
+      <li><b>v0.2</b> (2026-08-02) — §10 참고 문헌에 2025~26 하네스 엔지니어링 문서 4건 보강.</li>
+      <li><b>v0.1</b> (2026-08-02) — 최초 작성. QT1~4 분류 축·유형별 전략·경계 규칙·골든셋 연계 정리.</li>
+    </ul>
+  </details>
+</header>
+
+<div class="callout">
+  <p class="callout-title">⚑ 이 문서가 현재의 최상위 정본 전략이다 (2026-08-02 확정)</p>
+  <p>Inline FDC Agent의 모든 설계·이슈·구현은 <a href="#strategy">§0 전략 선언</a>과
+    <a href="#boundaries">§8 운영 루프</a>에 정렬한다. 다른 문서·이슈가 이 문서와
+    충돌하면 <b>이 문서가 이긴다</b>. 전략을 바꿀 때는 이 문서를 먼저 개정하고
+    (버전·개정 로그), 그 다음에 이슈·코드를 움직인다.</p>
+</div>
+
+<div class="callout">
+  <p class="callout-title">📚 설계 시리즈 — 이 문서가 1편(뿌리)이다</p>
+  <p>Inline FDC Agent 설계 문서는 <b>시리즈로 쌓인다</b>: 1편(이 문서)이 전략 지도이고,
+    이후 편은 하위 주제를 한 편씩 파서 <code>docs/</code>에 추가한다. 새 편이 나올 때마다
+    아래 목차에 등재하고, 모든 편은 1편의 전략 선언·운영 루프에 정렬한다.</p>
+  <ol>
+    <li><b>질문 유형(QT) 분류와 유형별 설계 전략</b> — 이 문서. 정본 전략.</li>
+    <li><i>(예정)</i> ACI 정의 — 제공 표면 계약 (<a href="#qt1-aci">§4 쟁점 4건</a>의 결정)</li>
+    <li><i>(예정)</i> QT1 라우팅 — 발동·슬롯, 단일→멀티 스킬 스케일링(L0/L1)</li>
+    <li><i>(예정)</i> 미니 골든셋 러너 — 측정 체계
+      (<a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/32">#32</a> 선행판)</li>
+  </ol>
+  <p>(예정) 편의 제목·순서는 논의에 따라 바뀔 수 있다 — 확정은 각 편이 나올 때다.</p>
+</div>
+
+<section>
+  <h2 id="summary">0. 한 줄 요약</h2>
+  <p>챗에 들어오는 질문을 <b>ⓐ 새 데이터 조달이 필요한가 × ⓑ 조달 절차를 사람이 미리
+    저작해 뒀는가</b> 두 축으로 <b>QT1~QT4</b>로 분류하고, 유형마다 다른 설계 전략을
+    적용한다: QT1 = 라우팅 + 결정론 실행, QT2 = 복합 절차의 spec 선언(workflow화),
+    QT3 = 무계획 컨텍스트 추론 + 지식 주입, QT4 = 폴백(현재 ReAct, plan-first 후보).
+    계획의 저작자는 기본이 <b>사람(spec)</b>이고, LLM은 QT4에서만 예비 저작자다.
+    모든 유형의 품질 판정은 QT 라벨이 달린 라우팅 골든셋
+    (<a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/32">#32</a>)이 맡는다.</p>
+
+  <h3 id="strategy">전략 선언</h3>
+  <blockquote>
+    <p><b>spec 존(QT1/2)을 akg·asf로 넓히고, 잔여(QT4)는 통제된 agent로 받아내되,
+    obs로 발굴하고 골든셋으로 판정하며 승격을 돌려 agent 존을 계속 좁힌다 —
+    지식(QT3)은 akg 코퍼스가 별도로 채운다.</b></p>
+  </blockquote>
+  <p>자율성은 목표가 아니라 예산이다. 약한 고정 온프렘 모델 환경에서는 예측 가능한
+    부분을 workflow로 내리고, 예측 불가능한 잔여만 agent로 남기고, 그 경계를
+    측정으로 계속 spec 쪽으로 옮기는 것이 최적이다. 행위자별 역할:</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>행위자</th><th>역할</th><th>담당 존</th></tr></thead>
+      <tbody>
+        <tr><td><b>asf</b> (agent-skill-foundry)</td><td>생산 — 절차를 spec으로 저작(공장, 템플릿+검증기)</td><td>QT1/2 확장</td></tr>
+        <tr><td><b>akg</b> (agent-knowledge-governance)</td><td>유통 — spec 허브(rev·active·런타임 fetch) / 별도로 지식 코퍼스 공급</td><td>QT1/2 배달 · QT3 품질</td></tr>
+        <tr><td><b>obs</b> (<a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/48">#48</a>)</td><td>발굴 — QT4 반복 조합 계측 = 승격 백로그 공급</td><td>QT4 축소의 입력</td></tr>
+        <tr><td><b>골든셋</b> (<a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/32">#32</a>)</td><td>판정 — 승격·라우팅 변경마다 회귀를 숫자로 확인</td><td>전 존의 게이트</td></tr>
+        <tr><td><b>BE</b> (이 레포)</td><td>소비·실행 — 라우팅, 결정론 실행기, agent 폴백, 계측</td><td>전 존</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2 id="coordinates">1. 좌표 — 이 문서가 다루는 설계 축</h2>
+  <p>에이전틱 시스템 설계는 두 축으로 나뉜다. 이 문서는 그중 두 번째 축의 전략 지도다.</p>
+  <ul>
+    <li><b>컨텍스트 엔지니어링</b> — 각 스텝에서 모델이 <em>무엇을 보는가</em>.
+      시스템 프롬프트 조립(<code>ChatPrompt</code>), 툴 규칙 소유, 주입 섹션, 히스토리 관리가 여기다.</li>
+    <li><b>제어 흐름 설계</b> — 다음 스텝을 <em>누가·언제·어떻게 정하는가</em>.
+      루프 구조, 계획의 저작자, 결정론/LLM 분담. <b>QT 분류는 이 축의 도구다.</b></li>
+  </ul>
+  <p>이 시스템의 정체는 문헌의 ReAct도, Plan-and-Execute도 아니다. 두 패턴은 모두
+    "계획을 <em>LLM이 런타임에</em> 짓는다"를 전제하는데(한 스텝씩이냐 한 번에냐만 다름),
+    이 시스템은 계획을 <b>사람이 설계 시점에 spec으로 컴파일</b>해 두고
+    (<code>steps[].binds</code>), LLM에는 좁은 역할만 남긴다. Anthropic의
+    workflow-vs-agent 구분으로는 <b>routing + deterministic workflow execution</b>이고,
+    계보상 고전 task-oriented dialogue 구조와 같다:</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>고전 dialogue 시스템</th><th>이 시스템에서</th><th>맡는 곳</th></tr></thead>
+      <tbody>
+        <tr><td>의도 분류 (intent classification)</td><td>어느 스킬인가 = 라우팅</td><td>LLM (+ 예정: L0/L1 필터)</td></tr>
+        <tr><td>슬롯 채우기 (slot filling)</td><td>spec <code>inputs</code>에 질문·폼·스냅샷 값 대입</td><td>LLM</td></tr>
+        <tr><td>대화 정책 (dialogue policy)</td><td>다음에 뭘 요청할까 = 조달 진행 판정</td><td>결정론으로 이관 중
+          (<a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/38">#38</a> panel-judge)</td></tr>
+        <tr><td>응답 생성 (NLG)</td><td>결과 서술</td><td>LLM</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>북극성은 <mark>LLM 판단 부담↓ · 결정론 제약↑</mark>다. 약한 온프렘 모델 전제에서
+    라우팅+슬롯 채우기는 자유 계획 저작보다 훨씬 좁은 과제라 감당 가능하고, 사람이 계획을
+    미리 컴파일해 두는 것은 약점 보완이 아니라 환경에 맞는 최적 설계다.</p>
+</section>
+
+<section>
+  <h2 id="axes">2. 분류 축과 QT 정의</h2>
+  <p>질문(정확히는 <b>턴</b>)을 두 축으로 분류한다:</p>
+  <ol>
+    <li><b>ⓐ 새 데이터 조달이 필요한가</b> — 이미 대화에 있는 것(이전 답변·스냅샷·조회
+      결과)만으로 답할 수 있으면 "불필요".</li>
+    <li><b>ⓑ 조달 절차를 사람이 미리 저작해 뒀는가</b> — 단일 spec이 커버하는가,
+      복수 스킬이지만 정형 절차인가, 아무도 안 써둔 조합인가.</li>
+  </ol>
+  <figure>
+    <pre class="diagram">
+질문(턴) 도착
+  │
+  ├─ ⓐ 새 조달 불필요 ──────────────────────────▶ QT3  해석 — 툴 없이 컨텍스트 서술
+  │
+  └─ ⓐ 새 조달 필요
+       │
+       ├─ ⓑ 단일 스킬이 커버 ────────────────────▶ QT1  라우팅 → spec 결정론 실행
+       │
+       ├─ ⓑ 복수 스킬·절차는 정형 (저작 가능) ──▶ QT2  복합 spec → 결정론 실행
+       │
+       └─ ⓑ 아무도 안 써둔 조합 ────────────────▶ QT4  폴백 — 현재 ReAct, plan-first 후보</pre>
+    <figcaption>D1. QT 분류 사다리. 위에서부터 순서대로 판정하며, QT1~2는 계획이 이미
+      있고 QT3는 계획이 필요 없다 — 런타임에 계획을 지어야 하는 곳은 QT4뿐이다.</figcaption>
+  </figure>
+  <p>분류는 <b>대화 단위가 아니라 턴 단위</b>다. 한 대화에서 첫 턴이 QT1이고 후속 턴이
+    QT3일 수 있으며, 한 턴 안에서 QT3 서술과 QT1 조달이 섞일 수도 있다
+    (<a href="#boundaries">§7 경계 규칙</a>).</p>
+</section>
+
+<section>
+  <h2 id="strategy-table">3. 유형별 전략 총괄표</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th></th><th>질문 유형</th><th>설계 패턴 (방법론)</th><th>LLM의 역할</th>
+          <th>결정론(코드·spec)의 역할</th><th>담당 트랙</th><th>골든셋 지표 (#32)</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><b>QT1</b></td>
+          <td>단일 스킬 조달</td>
+          <td>Routing + workflow 실행<br>(intent classification + slot filling)</td>
+          <td>스킬 선택 · 인자 채우기 · 결과 서술</td>
+          <td><code>steps[].binds</code> 체인 실행, 로드 시 배선 검증</td>
+          <td><a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/33">#33</a> L0 필터 ·
+            <a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/34">#34</a> L1 라우터 ·
+            akg #43 스키마 v3</td>
+          <td>top-1 라우팅 정확도, 슬롯 정확도</td>
+        </tr>
+        <tr>
+          <td><b>QT2</b></td>
+          <td>정형 복합 절차</td>
+          <td>Workflow화 — 스킬 간 오케스트레이션을 spec 선언으로
+            (Programmatic Tool Calling 원리)</td>
+          <td>진입 선택 · 결과 서술 (LLM 추론 2회로 압축)</td>
+          <td>복합 spec이 스킬 N개를 순서 실행</td>
+          <td><a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/36">#36</a> ·
+            <a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/21">#21</a> inspect ·
+            akg equipment-check</td>
+          <td>완주율, 스텝 수 (LLM 체이닝 대비)</td>
+        </tr>
+        <tr>
+          <td><b>QT3</b></td>
+          <td>해석 (조달 불필요)</td>
+          <td>무계획 — 컨텍스트 추론 + 지식 주입</td>
+          <td>전부 — 자유 서술이 곧 처리</td>
+          <td>지식 공급(akg 팩트·코드표·이상 카탈로그), 히스토리·스냅샷 관리</td>
+          <td>akg 코퍼스 ·
+            <a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/21">#21</a> 카탈로그 ·
+            <a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/41">#41</a> 캐시/캡</td>
+          <td>과발화율 — 툴을 안 부르는 게 정답인 케이스</td>
+        </tr>
+        <tr>
+          <td><b>QT4</b></td>
+          <td>spec 밖 즉석 조합</td>
+          <td>폴백 — 현재 ReAct, 후보 Plan-and-Execute/ReWOO
+            (LLM이 binds 형식 미니 spec 즉석 저작 → 검증 → 결정론 실행)</td>
+          <td>계획 저작 · 결과 서술</td>
+          <td>계획 검증기 · 계획 실행기(기존 인프라 재사용) · 폴백 진입 판정</td>
+          <td><a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/39">#39</a> ·
+            <a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/35">#35</a> 스텝 예산</td>
+          <td>plan on/off 비교 — 완주율 · 왕복 수 · LENGTH율</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>표를 관통하는 원리: <b>위로 갈수록 계획의 저작자가 사람이고, QT4만 LLM이 예비
+    저작자다.</b> 운영 목표는 QT4 발생을 spec 저작으로 승격해 QT2→QT1로 끌어올리는
+    플라이휠이다(<a href="#boundaries">§7</a>).</p>
+</section>
+
+<section>
+  <h2 id="qt1">4. QT1 — 단일 스킬 조달</h2>
+  <p><b>정의</b>: 새 데이터가 필요하고, 단일 스킬 spec이 그 조달 절차를 통째로 커버하는
+    질문. 예: "CVD-01 지난주 센서값 추이 보여줘" → <code>fdc-trace-reading</code> 라우팅.</p>
+  <p><b>처리 경로</b>: LLM이 스킬을 고르고(<code>spec.inputs</code> 계약으로 인자를 채우면)
+    <code class="cite">SkillLoader.runSkill</code>이 <code>steps[].binds</code> 체인을
+    결정론으로 실행한다. 배선은 로드 시점에 검증된다(인자 실재 · 앞 스텝만 참조 ·
+    SQL <code>:var</code> 정확 일치 — 어긋나면 기동 실패).</p>
+  <p><b>현재 상태</b>: 가동 중이되 구간별 지위가 다르다 — 결정론 실행부(코드)는
+    <b>검증 체계가 있고 구멍이 목록으로 열거된</b> 상태, LLM 구간(발동·슬롯·서술)은
+    <b>뭐가 얼마나 안 되는지 말할 측정 수단 자체가 없는</b> 상태다. 정복의 다음 수는
+    후자의 측정 체계(미니 골든셋)다.</p>
+
+  <h3 id="qt1-scope">정복 범위 — 단일 스킬 우선 (2026-08-02 결정)</h3>
+  <p>QT1 정복은 <b>스킬 하나를 잘 돌리는 것</b>부터다. 멀티 스킬 간 선택(라우팅·스케일링)은
+    그 다음 단계의 논의로 분리한다 — 아래 파이프라인은 <b>호출이 이미 확정된 뒤</b>
+    (스킬 결정·절차 결정)의 턴 내부를 다룬다.</p>
+
+  <h3 id="qt1-pipeline">턴 파이프라인 — 조달 → 제공 → 서술</h3>
+  <pre class="diagram">
+조달 ─────────────▶ 제공 ─────────────▶ 서술
+필요한 데이터 확보     확보한 데이터를        증강 LLM이 답변 생성
+                     증강 LLM에 주입
+dev: 스킬 SQL 직접실행  = Retrieval 팔        produces 계약 준수
+restricted: panel-     = ACI 정의 대상        지어내기 금지
+judge 조달(#38·#44)</pre>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>단계</th><th>내용</th><th>주체</th><th>상태</th></tr></thead>
+      <tbody>
+        <tr><td><b>조달</b></td>
+          <td>dev = 스킬 SQL 직접 실행 · restricted(사내) = panel-judge가 결정론 판정으로
+            데이터 요청 카드를 내림(<a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/38">#38</a>,
+            chat/data)</td>
+          <td>코드</td>
+          <td>검증 체계 있음 — 단 백로그 4건(아래)</td></tr>
+        <tr><td><b>제공</b></td>
+          <td>조달된 데이터를 어떤 형태로 모델에 주입하나 — 증강 LLM의 <b>Retrieval</b> 팔.
+            ACI로 정의한다(아래)</td>
+          <td>코드</td>
+          <td>표면은 존재하나 계약 미명문화 · 경로 간 비대칭</td></tr>
+        <tr><td><b>서술</b></td>
+          <td>툴 결과 위에서 답변 생성 — <code>produces</code>(반드시 포함)·avoid 준수</td>
+          <td>LLM</td>
+          <td>측정 없음 — 미니 골든셋 대상</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>조달의 결정론부는 "정복"이 아니라 <b>"구멍이 열거 가능한 상태"</b>가 정확하다.
+    열거된 백로그: ① 컬럼 층위 배선 검증 미구현
+    (<a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/7">#7</a> ②) —
+    로드 검증을 통과하고도 실행 시점에 터질 수 있는 구멍, ② <code>steps[]</code> 의미론
+    이중성(직접 실행 = 첫 행 무조건 바인드, pick 개념 없음)과 <code>branches</code> 죽은
+    필드, ③ 실 Oracle 미실증(fixture만 검증), ④ 조달 경로(#38/#44) 운영 실증 전.</p>
+
+  <h3 id="qt1-aci">ACI 정의 — 제공 단계의 열린 설계 과제</h3>
+  <p>ACI(Agent-Computer Interface, SWE-agent → Anthropic 부록 용어) = <b>모델이 보고 만지는
+    모든 표면</b>. 현재 코드에서 표면은 이미 중앙화되어 있어, 정의 작업은 재구조가 아니라
+    <b>계약 명문화 + 미결정 지점 결정</b>이다:</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>표면</th><th>실물</th><th>현재 계약</th></tr></thead>
+      <tbody>
+        <tr><td>시스템 프롬프트</td><td><code class="cite">ChatPrompt.system</code></td>
+          <td>정체성 + 툴이 스스로 내놓은 <code>guidance()</code> 집계 — 툴 없으면 규율도 안 실림</td></tr>
+        <tr><td>맥락 섹션</td><td><code class="cite">ChatPrompt.contextSection</code></td>
+          <td>마지막 사용자 메시지 앞의 별도 system 메시지 — SCOPE·DATA·PROGRESS·INPUTS
+            4블록, <code>SECTION_*</code> 머리표 상수가 테스트 표식</td></tr>
+        <tr><td>툴 결과 되먹임</td><td><code class="cite">SkillLoader.buildResult</code></td>
+          <td>[조회 결과] + [출력 지침] + produces + [하지 말 것] + [예시] —
+            <b>서술 계약이 툴 결과 안에 실려 감</b></td></tr>
+        <tr><td>툴 노출(이름·설명·스키마)</td><td>spec→컴파일</td>
+          <td>라우팅 편 소관 — 이 문서의 다음 단계 논의</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p><b>결정해야 할 쟁점 4건</b>:</p>
+  <ul>
+    <li><b>push vs pull 비대칭</b> — 직접 실행 결과는 행 전량을 JSON으로 툴 결과에 붓고(push,
+      <code class="cite">SkillLoader.stringify</code>), 첨부/조달 스냅샷은 스키마만 펴고
+      <code>query_snapshot</code>으로 당겨오게 한다(pull, Design B). chat/data 가동 후엔 같은
+      데이터가 출처에 따라 다른 형태로 도달한다 — 통일할지, 비대칭을 의도로 못 박을지.</li>
+    <li><b>push 경로의 행 상한·직렬화 포맷</b> — 현재 무상한. 사내 실DB 이관 전 결정 필요.</li>
+    <li><b>서술 계약의 전달 위치</b> — produces·avoid·예시가 툴 결과에 실리는 현 구조 유지 vs
+      시스템 프롬프트로 이동(멀티턴 이력 오염 고려).</li>
+    <li><b><code>SECTION_*</code> 상수의 지위 승격</b> — ACI 계약의 정식 앵커로 선언.</li>
+  </ul>
+
+  <h3 id="qt1-scaling">스케일링 전략 — 다음 단계 (멀티 스킬 라우팅)</h3>
+  <p>스킬이 늘수록 선택 정확도가 무너지는 문제의 대비책(등록 순서대로). 단일 스킬 정복
+    뒤의 논의다:</p>
+  <ul>
+    <li><b>L0 결정론 스코프 필터</b>
+      (<a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/33">#33</a>) —
+      질의 대상·입력으로 후보를 사전 축소. LLM 개입 없음. 트리거: 스킬 6+.</li>
+    <li><b>L1 후보 선별 라우터</b>
+      (<a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/34">#34</a>) —
+      어휘(BM25)→임베딩, 적응형 K. 트리거: 스킬 10+. 선결: 사내 GW <code>/embeddings</code> 유무.</li>
+    <li><b>스키마 쪽 절반 = akg #43</b> — description 골격 v3(notFor·예시·네임스페이스).
+      라우팅 신호는 spec이 실어야 하므로 스킬 양산 전에 결정한다.</li>
+  </ul>
+  <p><b>측정</b>: 단일 스킬 구간은 <b>미니 골든셋</b>(#32의 선행판)부터 — 양성 케이스
+    (<code>output.examples[].ask</code> 재사용), 음성 케이스(QT3 질문에 툴을 안 부르는 게
+    정답), 결핍 케이스(입력 부족 시 <code>request_input</code>이 정답), 서술은
+    <code>produces</code> 포함 여부로 기계 채점. 러너는 #32와 공용으로 설계해 멀티 스킬
+    확장 시 top-1 정확도·혼동행렬로 그대로 넓힌다.</p>
+</section>
+
+<section>
+  <h2 id="qt2">5. QT2 — 정형 복합 절차</h2>
+  <p><b>정의</b>: 한 스킬로는 안 끝나지만 순서가 정해져 있고 반복되는 질문.
+    예: "CVD-01 점검해줘" — 분포 확인 → 센서 상태 → 이벤트 대조 → 종합, 항상 이 순서.
+    QT1과의 차이는 스킬 여러 개를 엮는다는 것, QT4와의 차이는 <b>엮는 방법이 알려져 있고
+    반복된다</b>는 것. 반복되므로 사람이 미리 저작해 둘 가치가 있다.</p>
+  <p><b>목표 경로</b>: 절차 자체를 복합 spec으로 선언
+    (<a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/36">#36</a>).
+    LLM 추론은 진입 선택 1회 + 결과 서술 1회로 압축되고, 조회 N종의 순서 실행은 코드가
+    맡는다. Anthropic Programmatic Tool Calling과 같은 원리로, 스킬 내부에서 이미 하는 일
+    (<code>binds</code> 체이닝)의 적용 범위를 스킬 사이로 넓히는 것이다.</p>
+  <p><b>현재 상태</b>: <mark>복합 spec이 없어 QT2 질문은 실질적으로 QT4 경로로 처리되고
+    있다</mark> — LLM이 스텝마다 다음 스킬을 추론(예: 점검 시나리오 = LLM 추론 4회, 그중
+    선택 판단 3회). #36의 본질은 QT2를 QT4 처리에서 QT1 처리로 옮기는 것이다.</p>
+  <p><b>열린 논점</b>: spec 포맷에 "다른 스킬 참조" 개념이 필요한가(akg 스키마 소관) vs
+    BE가 내부적으로 합성 툴을 만드는 걸로 충분한가. akg equipment-check 문서 타입이 점검
+    항목 카탈로그로서 절차 선언의 데이터 소스가 될 수 있다.</p>
+  <p><b>트리거</b>: <a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/21">#21</a>
+    inspect 구현 시점. 단발 조회가 대부분인 지금은 엮을 것이 없다.</p>
+</section>
+
+<section>
+  <h2 id="qt3">6. QT3 — 해석 (조달 불필요)</h2>
+  <p><b>정의</b>: 새 데이터를 가져올 필요가 없는 질문. 이미 대화에 있는 것(이전 답변·
+    붙여넣은 스냅샷·조회 결과) 위의 추론. 예: "이건 뭐예요?", "이 값 왜 튀었어요?",
+    "그래서 문제가 뭔데요?". 최대로 가야 <code>query_snapshot</code> 단발 재조회다.</p>
+  <p><b>처리 경로</b>: 계획도 라우팅도 불필요 — LLM이 히스토리와 스냅샷 스키마 카탈로그
+    위에서 자유 서술한다. 이 경로는 spec 체계가 막은 적이 없다: 결정론으로 내린 것은 조달
+    경로뿐이고, 해석·서술은 처음부터 LLM 자유 영역이다. <b>따라서 멀티턴 후속 질문에서
+    시스템이 대답 불능이 되지 않는다</b> — 후속 질문 대부분이 QT3이기 때문이다.</p>
+  <p><b>승부처는 제어 흐름이 아니라 지식이다.</b> "이 값이 문제인가"를 판정하려면 정상
+    범위·코드표·알려진 이상 패턴이 필요한데, 이는 루프 설계가 아니라 지식 공급(akg 팩트
+    코퍼스, equipment-check 문서 타입,
+    <a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/21">#21</a> 이상
+    카탈로그)이 만든다. 알려진 갭: <code>valueRules</code> 없이 코드표 부재 상태로 서술
+    중 — akg 코퍼스가 후속이다.</p>
+  <p><b>운영 리스크 두 가지</b>:</p>
+  <ul>
+    <li><b>라우터 과발화</b> — 해석만 하면 되는 턴에 스킬을 또 돌리는 것. 골든셋에
+      "툴을 안 부르는 게 정답"인 멀티턴 케이스를 넣어 감시한다. 시스템 프롬프트에서
+      "툴 없이 컨텍스트에서 답해도 된다"가 항상 열려 있어야 한다.</li>
+    <li><b>컨텍스트 성장</b> — 히스토리 전량 주입 + 스냅샷 전량 재전송은 턴이 쌓일수록
+      커진다. 멀티턴이 길어질수록
+      <a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/41">#41</a>
+      (content-hash 캐시 + context≤50)의 우선순위가 올라간다.</li>
+  </ul>
+</section>
+
+<section>
+  <h2 id="qt4">7. QT4 — spec 밖 즉석 조합 (폴백)</h2>
+  <p><b>정의</b>: 새 조달이 필요한데 그 조합을 아무도 spec으로 안 써둔 질문.
+    예: "CVD-01이랑 CVD-02 지난주 데이터 비교해서 어느 쪽이 레시피 변경 영향 컸는지" —
+    개별 스킬은 있지만 "설비 2대 × 기간 정렬 × 이벤트 대조 × 비교 서술"로 엮은 절차는
+    없다. 사람이 모든 조합을 예상해 저작할 수 없으므로 이 구멍은 반드시 남는다.</p>
+  <p><b>"폴백"의 의미</b>: QT1~3이 커버하지 못한 질문만 받는 2순위 경로라는 뜻이다.
+    spec이 커버하는 질문(QT1·2)에는 plan 단계가 아예 돌지 않는다 — 결정론이 이미 아는
+    것을 약한 모델에게 다시 묻는 낭비이기 때문이다. QT4에서만 계획의 저작자가
+    사람(설계 시점)에서 LLM(런타임)으로 바뀐다.</p>
+  <p><b>현재 상태</b>: 순수 ReAct — LLM이 <code>MAX_STEPS=4</code> 안에서 한 스텝씩
+    추론. 전체 조망이 없어 스텝 낭비·중도 이탈이 생기는 구간이다.</p>
+  <p><b>업그레이드 후보 = plan-first</b>
+    (<a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/39">#39</a>, 논의 단계):
+    실행 전에 전략 수립 → 투두 목록 → 항목별 실행. 문헌의 Plan-and-Execute/ReWOO 계열로,
+    "스텝 간 의존이 있는 다단계 + 작은 실행 모델"이라는 교과서적 적용 대상과 이 환경이
+    일치한다. 단, 원형은 강한 계획자를 전제하므로 약한 계획자 갭을 다음으로 메운다:</p>
+  <ul>
+    <li><b>계획을 자유 프로즈로 받지 않는다</b> — binds 형식의 미니 spec을 즉석 저작시키고,
+      기존 배선 검증기 계열로 검증한 뒤, 기존 결정론 실행기로 돌린다. 약한 모델 대비
+      템플릿+검증기 철학과 실행 인프라 재사용이 동시에 성립한다.</li>
+    <li><b>발동 조건도 결정론으로</b> — 예: 라우터가 확신 있는 단일 매치를 못 찾았고
+      해당 복합 spec도 없을 때만 plan 단계 진입.</li>
+    <li><b>스텝 예산과 연동</b>
+      (<a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/35">#35</a>) —
+      MAX_STEPS=4에서 계획 1콜은 예산의 25%다. 계획을 별도 호출 대신 첫 실행 스텝에 얹는
+      절충(첫 응답에서 계획 목록 + 첫 툴 콜 동시 산출)도 후보다.</li>
+  </ul>
+  <p><b>채택 판정</b>: 골든셋에서 plan on/off 비교(완주율·왕복 수·스텝 분포·LENGTH율).
+    숫자 없이 채택하지 않는다.</p>
+  <p><b>실패 폴백 = 2단 정책</b>: ① 시도(agent 또는 plan-first) → ② 계획 검증 실패·스텝
+    소진 시 <b>정직한 한계 고지</b>로 내려앉는다 — "이 조합은 지원 절차가 없습니다"
+    + 가장 가까운 스킬 제안 + 필요 데이터 요청 카드(기존 QT3 서술·조달 부품 재사용).
+    약한 모델이 허우적대다 내는 그럴듯한 오답이 agent 존의 최악 사례이므로, 이를
+    구조적으로 차단한다.</p>
+</section>
+
+<section>
+  <h2 id="boundaries">8. 운영 루프 — 경계 규칙과 승격 플라이휠</h2>
+  <h3 id="boundary-qt3">QT3 ↔ QT1/2 경계 = "새 데이터가 필요해지는 순간"</h3>
+  <p>"이 값 왜 튀었어요?"는 QT3이지만, 답하다가 그 시점 이벤트 로그가 필요해지면 그 턴은
+    QT1(이벤트 스킬 라우팅)로 넘어간다. QT는 턴 단위 분류이고, 한 턴 안에서 QT3 서술과
+    QT1 조달이 섞일 수 있다.</p>
+  <h3 id="boundary-qt4">QT2 ↔ QT4 경계 = "반복되는가"</h3>
+  <p>처음 보는 조합은 QT4다. 같은 조합이 로그에 반복해서 찍히면 spec 승격 후보가 된다.
+    이것이 운영 플라이휠이고, <a href="#strategy">§0 전략 선언</a>의 실행 형태다:</p>
+  <figure>
+    <pre class="diagram">
+운영 중 QT4 발생 (통제된 agent 폴백 — 실패 시 정직 고지, §7)
+      │  obs #48이 계측
+      ▼
+반복 조합 발굴  ──▶  asf가 spec 저작(생산)  ──▶  akg가 유통(허브)  ──▶  골든셋 #32가 회귀 판정
+                                                                            │
+      ┌─────────────────────────────────────────────────────────────────────┘
+      ▼
+QT1/2 존 확대  ──▶  스킬 수 증가 = 라우팅 세금 발생  ──▶  #33 L0 / #34 L1 / akg#43로 납부
+      │
+      ▼
+QT4 존 축소  (루프 처음으로)</pre>
+    <figcaption>D2. 운영 루프 — QT4 발생 로그가 곧 스킬 저작 백로그다. 승격할수록
+      런타임 계획이 필요한 영역이 줄어든다.</figcaption>
+  </figure>
+  <p><b>라우팅 세금</b>: 승격은 공짜가 아니다. 스킬이 늘수록 라우팅(QT1의 심장) 정확도가
+    떨어지는 것이 스킬 스케일링 문제의 출발점이므로, QT1/2 확장에는 라우팅 보강이
+    반드시 동반된다. 납부 시점은 골든셋의 top-1 정확도가 알려준다(스킬 6+에서 L0,
+    10+에서 L1).</p>
+</section>
+
+<section>
+  <h2 id="measurement">9. 측정 — 골든셋 QT 라벨링</h2>
+  <p>골든셋(<a href="https://github.com/ollybaysion/fdc-agent-be-spring/issues/32">#32</a>)의
+    각 케이스에 QT 라벨을 달면 "타입별 정답률"이 나오고, 그것이 곧 "어느 존이 약한가"의
+    측정이 된다:</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>라벨</th><th>그 존의 정답률이 말해주는 것</th></tr></thead>
+      <tbody>
+        <tr><td>QT1</td><td>라우팅·슬롯 품질 — L0/L1 도입 시점 판단 근거</td></tr>
+        <tr><td>QT2</td><td>#36(workflow화) 필요성의 정량 근거 — LLM 체이닝의 실패율</td></tr>
+        <tr><td>QT3</td><td>과발화율 — 해석 턴에 툴을 부르는 비율</td></tr>
+        <tr><td>QT4</td><td>#39(plan-first) 채택 여부의 판정 숫자</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>케이스 소스: 첫 턴 질문은 spec <code>output.examples[].ask</code> 재사용(스킬 추가 =
+    테스트 공짜). <b>멀티턴 케이스는 별도로 저작해야 한다</b> — 특히 "툴을 안 부르는 게
+    정답"인 QT3 후속 질문 케이스가 없으면 과발화를 측정할 수 없다.</p>
+</section>
+
+<section>
+  <h2 id="references">10. 참고 문헌</h2>
+  <ul>
+    <li>ReAct — Yao et al. 2022. 인터리브형 추론+행동. 현재 QT4 경로.</li>
+    <li>Plan-and-Solve — Wang et al. 2023. 계획 선행형의 원형.</li>
+    <li>ReWOO — Xu et al. 2023. 변수 플레이스홀더로 묶인 툴 콜 의존 그래프를 한 번에
+      계획. <code>steps[].binds</code>는 이 구조를 사람이 저작하는 형태다.</li>
+    <li>LLMCompiler — Kim et al. 2024. 계획을 DAG로 뽑아 병렬 실행.</li>
+    <li><a href="https://www.anthropic.com/research/building-effective-agents">Anthropic,
+      Building effective agents</a> — workflow vs agent 구분.</li>
+    <li><a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/programmatic-tool-calling">Anthropic,
+      Programmatic Tool Calling</a> — 오케스트레이션을 모델 턴이 아니라 코드로. QT2 전략의 원리.</li>
+    <li><a href="https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents">Anthropic,
+      Effective harnesses for long-running agents</a> (2025-11) — 강한 모델도 자유 계획 대신
+      결정론 체크리스트(전 항목 "실패"로 시작, 한 번에 하나)로 묶는 게 낫다는 자기 실증.
+      QT4 plan-first를 "하네스 강제 제어 구조"로 설계할 근거.</li>
+    <li><a href="https://claude.com/blog/building-multi-agent-systems-when-and-how-to-use-them">Anthropic,
+      When to use multi-agent systems (and when not to)</a> (2026-01) — 멀티에이전트 절제론
+      (토큰 3~10배). 순차 단계의 에이전트 분리 금지, 검증 전담 에이전트 권장 — panel-judge와
+      같은 방향.</li>
+    <li><a href="https://claude.com/blog/harnessing-claudes-intelligence">Anthropic,
+      Agent Harness Design: 3 Patterns</a> (2026-04) — 하네스 정의(루프·툴·컨텍스트·가드레일)와
+      최소주의. "모델이 이미 아는 것을 활용하라"는 약한 모델 환경에선 역방향 적용
+      (spec·akg가 지식을 공급).</li>
+    <li><a href="https://claude.com/blog/a-harness-for-every-task-dynamic-workflows-in-claude-code">Anthropic,
+      A harness for every task</a> (2026) — 과업별 동적 workflow 구성.</li>
+  </ul>
+</section>
+<!-- CONTENT:END -->
+</main>
+</div>
+<script>
+(function () {
+  "use strict";
+  var root = document.documentElement;
+  var KEY = "html-doc-theme";
+
+  // 테마: 저장된 수동 선택 복원 → 토글은 현재 실효 테마의 반대로
+  var saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) { /* file:// 제약 등 — 무시 */ }
+  if (saved === "light" || saved === "dark") root.setAttribute("data-theme", saved);
+  var btn = document.getElementById("theme-toggle");
+  function effective() {
+    return root.getAttribute("data-theme") ||
+      (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  }
+  function paint() { btn.textContent = effective() === "dark" ? "라이트 ☀" : "다크 ☾"; }
+  btn.addEventListener("click", function () {
+    var next = effective() === "dark" ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem(KEY, next); } catch (e) { /* 무시 */ }
+    paint();
+  });
+  paint();
+
+  // TOC: main의 h2/h3(id 필수 — check.mjs가 강제)로 평면 리스트 생성
+  var headings = Array.prototype.slice.call(
+    document.querySelectorAll("main h2[id], main h3[id]"));
+  var list = document.getElementById("toc-list");
+  var linkFor = {};
+  headings.forEach(function (h) {
+    var li = document.createElement("li");
+    li.className = "toc-" + h.tagName.toLowerCase();
+    var a = document.createElement("a");
+    a.href = "#" + h.id;
+    a.textContent = h.textContent;
+    li.appendChild(a);
+    list.appendChild(li);
+    linkFor[h.id] = a;
+  });
+
+  // 현재 섹션 하이라이트
+  if ("IntersectionObserver" in window) {
+    var obs = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (!e.isIntersecting) return;
+        Object.keys(linkFor).forEach(function (id) {
+          linkFor[id].classList.remove("active");
+        });
+        linkFor[e.target.id].classList.add("active");
+      });
+    }, { rootMargin: "0px 0px -70% 0px" });
+    headings.forEach(function (h) { obs.observe(h); });
+  }
+
+  // 헤딩 앵커(§) — TOC 생성 뒤에 붙인다(TOC 라벨에 § 섞임 방지)
+  headings.forEach(function (h) {
+    var a = document.createElement("a");
+    a.className = "hanchor";
+    a.href = "#" + h.id;
+    a.textContent = "§";
+    h.appendChild(a);
+  });
+})();
+</script>
+</body>
+</html>
